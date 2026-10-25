@@ -31,6 +31,18 @@ Vì sao: hiện mỗi Page là một tài khoản riêng trong tool (HUONG_DAN.m
 | Khi lỗi | không chuyển được danh tính | KHÔNG đăng (tránh đăng nhầm cá nhân), ghi nhật ký, ảnh lỗi, bỏ lượt |
 | Không đổi | | Cách đăng / xác minh / đọc kết quả / khoá nick hiện có |
 
+### 3b. Kết quả thử thật (25/10/2026, Tài khoản 4, cách B – chỉ chuyển, không đăng)
+Chuyển Cá nhân → Page "HTX chó mèo" → về Cá nhân: **thành công**. Ảnh + dữ liệu: `scratchpad/f9_probe/` (không đưa vào repo).
+
+| Việc | Cách làm đã kiểm chứng |
+|---|---|
+| Mở menu tài khoản | nút `role=button`, `aria-label="Account, your profile"` (trong `role=banner`). ⚠ Nhãn cũ "Trang cá nhân của bạn" giờ chỉ còn trên `svg` – **`fb_login.fetch_profile_name` và `_logout_on_facebook` đang dùng nhãn cũ, cần sửa trong task này** |
+| Hộp menu | `div[role=dialog]:not([aria-label='Messenger']):visible` (luôn có 1 hộp Messenger ẩn) |
+| Chuyển sang danh tính X | trong menu có sẵn nút `role=button` tên **"Chuyển sang X"** (cả khi đang ở Page: "Chuyển sang <tên cá nhân>"). Bấm → chờ ~8 giây, trang tải lại |
+| Danh sách đủ (khi có ≥2 Page) | nút "Xem tất cả trang cá nhân" → hộp "Chọn trang cá nhân", mỗi danh tính 1 nút `"<tên>, N thông báo"`, danh tính đang dùng có thêm **", đang chọn"** |
+| Biết đang ở danh tính nào | cookie **`i_user`** = id Page khi đang là Page (`61595395697904` cho HTX chó mèo), **không có** khi là Cá nhân; `c_user` luôn là id cá nhân. Dòng đầu menu = tên danh tính đang dùng |
+| Id danh tính (cho `identities[].id`) | Page: giá trị `i_user` sau khi chuyển; Cá nhân: `"self"` |
+
 ## 4. Chia việc (dự kiến)
 | Vai | Nhánh | File được sửa | Việc |
 |---|---|---|---|
@@ -69,3 +81,5 @@ Ghi chú: đăng bài, theo dõi, chăm bài, kiểm kết quả của cùng m�
 | Thời gian | Bước | Vai | Nhánh / commit | Kết quả |
 |---|---|---|---|---|
 | 25/10 | 1 Lập kế hoạch | Điều phối | main | Bản nháp, chờ PM trả lời mục 7 |
+| 25/10 | 1 Lập kế hoạch | Điều phối + PM | main | PM trả lời đủ 4 câu (B, bỏ nhóm, nút Gộp, theo dõi theo danh tính) |
+| 25/10 | 1 Thử thật | Điều phối | – | TK4: chuyển sang HTX chó mèo + về Cá nhân thành công; cách nhận biết = cookie `i_user` (mục 3b) |
