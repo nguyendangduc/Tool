@@ -70,7 +70,49 @@ Reviewer **tự kiểm chứng** từng lỗi (chạy thử trên bản sao tron
 2. Test tay theo mục 6 của plan trên **nick test + nhóm test** (đóng gói / giao diện / Facebook thật).
 3. Merge: `git switch main` → `git merge --no-ff int/NNN -m "[pm] merge NNN: <tên việc>"` → `python -m pytest tests -q`.
 4. Cập nhật `HUONG_DAN.md`, `KE_HOACH_THUONG_MAI.md`, `CHANGELOG.md` nếu cần. Xoá worktree + nhánh của task.
-5. Đủ để gửi khách → gắn tag `vX.Y.Z` → chạy `dong_goi.ps1` từ tag đó.
+5. Đủ để gửi khách → làm theo mục "Phát hành".
+
+## Phát hành (gửi bản mới cho khách)
+**Số phiên bản `vX.Y.Z`:**
+| Tăng | Khi nào | Ví dụ |
+|---|---|---|
+| Z (vá) | Chỉ sửa lỗi, không thêm tính năng, config không đổi | Facebook đổi nút Đăng → `v1.0.1` |
+| Y (tính năng) | Thêm tính năng; config cũ vẫn mở được | Thêm F11 thích bài → `v1.1.0` |
+| X (lớn) | Đổi cấu trúc config / cách cài, khách phải làm thêm bước | Chuyển sang .exe → `v2.0.0` |
+
+**Các bước (PM làm, Điều phối hỗ trợ):**
+1. Trên `main`: `python -m pytest tests -q` phải pass hết.
+2. Thêm mục mới ở đầu `CHANGELOG.md`:
+   ```
+   ## v1.1.0 – 30/10/2026
+   - Thêm: … (task NNN)
+   - Sửa: … (task NNN)
+   - Lưu ý cho khách: … (nếu phải làm gì sau khi cập nhật)
+   ```
+   Viết cho khách đọc, có dấu, không ghi tên hàm. Commit `[pm] release: v1.1.0`.
+3. Gắn tag: `git tag -a v1.1.0 -m "v1.1.0"`.
+4. Đóng gói từ đúng tag: `git worktree add .claude/worktrees/release v1.1.0` → chạy `dong_goi.ps1` trong đó → kiểm thư mục `FacebookTool_GuiKhach` (đúng danh sách file, không có log / config / `.py`) → `git worktree remove .claude/worktrees/release`.
+5. Đổi tên gói thành `FacebookTool_v1.1.0`, cài thử trên máy / thư mục sạch (`CAI_DAT.bat` → `MO_TOOL.bat` mở được).
+6. Gửi khách, ghi vào sổ khách (giữ riêng, KHÔNG để trong repo – cùng chỗ `_NGUOI_BAN_khong_gui_khach/da_cap.csv`): khách · mã máy · phiên bản · ngày gửi.
+
+## Sửa gấp (hotfix – khách đang bị lỗi)
+Dùng khi tool **đang bán bị hỏng** (Facebook đổi giao diện, lỗi làm tool không chạy). Việc khác – kể cả lỗi nhỏ – đi quy trình thường.
+
+```
+tag đang bán (vd v1.1.0) ─► hotfix/NNN-ten-loi ─► sửa + test ─► Reviewer (nhanh) ─► PM test tay ─► merge main ─► tag v1.1.1 ─► gửi khách
+```
+
+| Bước | Rút gọn so với quy trình thường |
+|---|---|
+| Plan | Plan ngắn: lỗi gì, ảnh lỗi / nhật ký, nguyên nhân, cách sửa, tiêu chí xong. PM chốt luôn trong chat |
+| Dựng khung | Bỏ (không đổi hợp đồng – đổi hợp đồng thì không phải hotfix) |
+| Dev + Tester | 1 Dev. Tester viết **1 test tái hiện lỗi** (trang HTML giả lập giống giao diện Facebook mới), FAIL trước khi sửa |
+| Reviewer | **Vẫn bắt buộc**, chỉ soát diff sửa + an toàn nick |
+| PM | **Vẫn bắt buộc** test tay trên nick test + merge |
+
+- Nhánh tạo từ **tag đang bán**, không từ `main` (main có thể có tính năng chưa phát hành): `git switch -c hotfix/NNN-ten-loi v1.1.0`.
+- Xong: merge vào `main`, gắn tag vá (`v1.1.1`) lên commit hotfix, phát hành như mục trên. Task đang chạy gộp `main` mới vào `int/NNN` của mình.
+- Ghi vào `CHANGELOG.md` mục `Sửa:` + ảnh lỗi gốc lưu ở `plans/NNN_*.md`.
 
 ## Nhiều task cùng lúc
 Số agent tăng theo **số task** và **số nhóm file rời nhau**, không theo cảm giác "việc to":
@@ -121,3 +163,5 @@ Tiếp theo: Reviewer · Đang chờ bạn: không
 - [ ] Reviewer ĐẠT cả 3 góc; mọi câu "PM quyết" đã có câu trả lời ở mục 7
 - [ ] Config cũ mở được (thử với một `config.json` cũ)
 - [ ] Đã cập nhật hướng dẫn + kế hoạch + changelog; xoá worktree + nhánh của task
+
+Một **bản phát hành** chỉ "xong" khi: pytest pass trên `main` · CHANGELOG có mục phiên bản · đã gắn tag · gói đóng từ đúng tag và cài thử được · đã ghi sổ khách.
