@@ -1,6 +1,6 @@
 # 003 – Một nick nhiều Page trong MỘT Chrome (F9)
 
-Trạng thái: **Vòng 2 – sửa sau review** (hợp đồng bổ sung ở mục 3.10, khung vòng 2 đã commit trên `main`; chờ Dev A / B / C + Tester)
+Trạng thái: **Đã merge** 26/10/2026 (`ee68aa7`, 128 test). Review: vòng 1 CẦN SỬA (4 lỗi) → vòng 2 CẦN SỬA (3 lỗi nhỏ) → vòng 3 ĐẠT. Dữ liệu PM: bỏ TK5 / Tai khoan 2 / tai khoan 1 (nick dính vi phạm cộng đồng), gộp Tài khoản 3 → Tài khoản 4 (Page HTX chó mèo). Việc tiếp: #004 (tự gộp khi đăng nhập trùng nick, bỏ nút Gộp, join_as_missing = cách b)
 PM chốt ngày: 25/10/2026
 Phụ thuộc: không (#002 PM gác lại 25/10/2026). Khoá file: `fb_login.py`, `fb_upstt.py`, `upstt_store.py`, `tool_store.py`, `tool_gui.py`, `gui_common.py`, `fb_monitor_v4.py`.
 
