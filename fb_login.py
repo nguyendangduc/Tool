@@ -2332,9 +2332,9 @@ def identity_dir(acc_dir, identity_id):
     Loi: ValueError neu identity_id khong phai "self" va khong phai toan chu so (chan duong dan la).
     Ghi chu: progress (kiem_tra_tien_do.json), khoa, tam nghi, status, fb_profile van dung acc_dir.
     """
-    ident = _norm_identity(identity_id)
-    if ident == IDENTITY_SELF:
+    if identity_id is None or identity_id in ("", IDENTITY_SELF):
         return Path(acc_dir)
+    ident = str(identity_id)   # khong strip: " 123" la id la -> ValueError (hop dong)
     if not re.fullmatch(r"\d+", ident):
         raise ValueError(f"Id danh tinh khong hop le: {ident!r}")
     path = Path(acc_dir) / IDENTITY_DIR_NAME / ident

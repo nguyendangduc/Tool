@@ -667,7 +667,7 @@ def enter_identity(page, account, acc_dir, ident, name):
         return False
     self_name = account_status.read_profile(acc_dir).get("name", "")
     try:
-        fb_login.ensure_identity(page, ident, name if ident != SELF else self_name, shot_dir=ERROR_SHOT_DIR)
+        fb_login.ensure_identity(page, ident, name if ident != SELF else self_name, shot_dir=BASE_DIR / "anh_loi")
     except fb_login.IdentitySwitchFailed as error:
         fb_login.note(BASE_DIR, error.note_text)
         return False
