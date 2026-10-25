@@ -60,7 +60,7 @@ Vì sao: hiện mỗi Page là một tài khoản riêng trong tool (HUONG_DAN.m
 |---|---|---|---|
 | 1 | Cách chuyển: (A) chọn "Đăng với tư cách" trong hộp đăng của nhóm, hay (B) chuyển cả trang sang Page rồi chuyển về? | Cho thử trên nick test | **B** – chuyển cả trang sang Page (như người thật), xong việc chuyển về Cá nhân |
 | 2 | Page chưa vào nhóm thì: bỏ nhóm đó, hay tự xin vào bằng Page? | Bỏ + báo, xin vào làm sau | (chưa trả lời – tạm theo đề xuất) |
-| 3 | Gộp "Tai khoan 2", "tai khoan 1" → "Tài khoản 5" và "Tài khoản 3" → "Tài khoản 4" ngay khi cập nhật, hay để bạn bấm nút "Gộp"? | Bạn bấm nút, có hộp xác nhận | (chưa trả lời – tạm theo đề xuất) |
+| 3 | Gộp "Tai khoan 2", "tai khoan 1" → "Tài khoản 5" và "Tài khoản 3" → "Tài khoản 4" ngay khi cập nhật, hay để bạn bấm nút "Gộp"? | Bạn bấm nút, có hộp xác nhận | **Bấm nút**: tool chỉ hiện cảnh báo "N tài khoản chung 1 nick" + nút **Gộp vào …**; bấm → hộp xác nhận liệt kê việc sẽ làm (Page nào vào đâu, kịch bản đổi ra sao, có backup, Chrome nào bị đăng xuất + xoá) → bấm Gộp mới làm |
 | 4 | Theo dõi nhóm + bình luận khách: dùng danh tính nào? | Chọn được như đăng bài | **Như đăng bài**: kịch bản theo dõi chọn danh tính; là Page thì vừa mở Chrome là chuyển sang Page luôn rồi mới quét / bình luận |
 
 Ghi chú: đăng bài, theo dõi, chăm bài, kiểm kết quả của cùng một tài khoản **dùng chung 1 thư mục Chrome** (`accounts/<mã>/browser_profile`, cả `fb_upstt.open_account_context` lẫn `fb_monitor_v4` đều gọi `fb_login.open_context(account_dir)`), và không bao giờ mở cùng lúc (khoá thư mục + `hold_nick`). Vì vậy mỗi lượt phải **tự chuyển đúng danh tính lúc bắt đầu** và **chuyển về Cá nhân lúc kết thúc** – lượt trước để Chrome ở Page nào thì lượt sau không được tin là vẫn ở đó.
