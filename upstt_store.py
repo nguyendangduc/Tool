@@ -45,6 +45,9 @@ CAMPAIGN_DEFAULTS = {
     "care_text": "",        # noi dung luu san de copy khi vao cham bai (B1); nguoi dung tu dan tay
     "join_answer": "",      # cau tra loi mau cho cau hoi tham gia nhom ("" = cau mac dinh fb_login.DEFAULT_JOIN_ANSWER)
     "join_wave": True,      # vao nhom xong bam 'Vay tay chao' / 'Xin chao' (neu Facebook co nut)
+    # Task 003: danh tinh dang bai cua muc nay - tool_store.materialize() ghi tu kich ban["post_as"][id tai khoan].
+    "post_as": "self",      # "self" = Ca nhan; chuoi so = id Page (cookie i_user), xem fb_login.ensure_identity
+    "post_as_name": "",     # ten danh tinh (de bam 'Chuyen sang <ten>'); "" voi Ca nhan
     "link_load_wait": 5,
     "post_wait": 6,
     "group_switch_wait": 6,
@@ -223,8 +226,12 @@ JOIN_FILE = "xin_vao_nhom.json"   # trang thai xin vao nhom cua tai khoan: {slug
 JOIN_WAITING = ("pending", "questions")   # chua la thanh vien -> luot dang bo qua nhom nay
 
 
-def join_state(account_id):
-    """{slug: {status, ...}}: trang thai xin vao nhom + cac nhom da doc duoc la 'da tham gia' (nhom_da_vao.json)."""
+def join_state(account_id, identity="self"):
+    """{slug: {status, ...}}: trang thai xin vao nhom + cac nhom da doc duoc la 'da tham gia' (nhom_da_vao.json).
+
+    identity (task 003): "self" (mac dinh, file o accounts/<id>/) | id Page -> doc o
+    fb_login.identity_dir(accounts/<id>, identity). (Khung: chua dung, luon doc cua Ca nhan.)
+    """
     try:
         st = json.loads((ACCOUNTS_DIR / account_id / JOIN_FILE).read_text(encoding="utf-8"))
     except Exception:
@@ -393,8 +400,12 @@ def pause_notes(account, campaign):
     return notes
 
 
-def reset_pause(account, kind, key):
-    """Nut Reset: bo nghi thu cong."""
+def reset_pause(account, kind, key, identity="self"):
+    """Nut Reset: bo nghi thu cong.
+
+    identity (task 003): nhom tam nghi / cho duyet nam o fb_login.identity_dir(acc_dir, identity); tam nghi CA nick
+    ('account' / 'recovering') van o acc_dir. (Khung: chua dung.)
+    """
     import fb_login
     acc_dir = ACCOUNTS_DIR / account["id"]
     if kind in ("account", "recovering"):

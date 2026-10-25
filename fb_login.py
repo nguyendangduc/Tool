@@ -1696,10 +1696,12 @@ def check_results(page, acc_dir, slugs, note=print, notifications=True, progress
     return read_ok, no_access
 
 
-def check_results_cli(acc_dir, slugs, open_ctx, note=print):
+def check_results_cli(acc_dir, slugs, open_ctx, note=print, identity=None):
     """Lenh --check-results (nut 'Kiem tra ngay'): doi tai khoan ranh -> xem tung nhom -> doc thong bao.
 
     Moi buoc ghi vao kiem_tra_tien_do.json de giao dien hien 'dang lam gi'. open_ctx() -> BrowserContext.
+    identity (task 003): None | {"id", "name"} - khac Ca nhan -> ensure_identity truoc khi doc, ket qua ghi vao
+    identity_dir(acc_dir, id), back_to_self trong finally; progress van ghi o acc_dir. (Khung: chua dung.)
     """
     n = len(slugs)
     write_progress(acc_dir, "start", "Đang chuẩn bị…", 0, n)
@@ -2247,6 +2249,142 @@ def _wait_profile_released(profile_dir, timeout=20):
     print("[LOGIN] Chrome cua tool van chay ngam -> tat no.")
     _kill_profile_chrome(profile_dir)
     _wait_no_profile_process(profile_dir, 15)
+
+
+# ------------------------------------------------------------------ danh tinh: Ca nhan / Page (task 003)
+# 1 nick Facebook = 1 tai khoan trong tool = 1 Chrome. Ben trong co cac danh tinh: Ca nhan ("self") + cac Page
+# nick quan ly (id = gia tri cookie i_user khi dang la Page; c_user luon la id ca nhan).
+# Moi luot: ensure_identity() luc dau -> lam viec -> back_to_self() trong finally -> dong Chrome.
+# Hop dong day du: plans/003_mot_nick_nhieu_page.md muc 3.
+IDENTITY_SELF = "self"
+IDENTITY_DIR_NAME = "danh_tinh"      # du lieu theo Page: accounts/<id>/danh_tinh/<id Page>/
+IDENTITIES_FILE = "danh_tinh.json"   # ket qua --read-identities: {"time": epoch, "identities": [...]}
+IDENTITY_SWITCH_WAIT = 8             # giay: cho trang tai lai sau khi bam 'Chuyen sang ...'
+IDENTITY_SWITCH_TIMEOUT = 30         # giay: toi da cho cookie i_user doi dung sau khi bam
+READ_IDENTITIES_MAX = 10             # toi da bay nhieu Page moi lan doc danh sach (moi Page ~ IDENTITY_SWITCH_WAIT)
+# File du lieu TACH THEO DANH TINH (Ca nhan: accounts/<id>/; Page: accounts/<id>/danh_tinh/<id Page>/).
+# Cac file khac (browser_profile, status.json, fb_profile.json, commented_ids.txt, tin_nhan.json, tim_nhom.json,
+# kiem_tra_tien_do.json, dang_nhap.log, khoa, tam nghi) giu theo NICK o accounts/<id>/.
+IDENTITY_FILES = ("xin_vao_nhom.json", "nhom_da_vao.json", "ket_qua.json", "cham_bai.json", "da_binh_luan_cham.txt",
+                  "nhom_tam_nghi.json", "binh_luan_loi.json")
+# Nut mo menu tai khoan (goc tren phai, trong role=banner). Nhan moi truoc, nhan cu de du phong (plan 003 muc 3b).
+ACCOUNT_MENU_LABELS = ("Account, your profile", "Trang cá nhân của bạn", "Your profile")
+# Chu nhat ky (hien cho nguoi dung) - giao dien / test dua vao: KHONG doi chu.
+IDENTITY_NOTES = {
+    "ok": "👤 Đang dùng: {name}",
+    "fail": "⛔ Không chuyển được sang \"{name}\": bỏ lượt, không đăng / bình luận gì để tránh dùng nhầm danh tính{shot}",
+    "shot": " (ảnh: anh_loi/{file})",
+    "missing": "⛔ Danh tính \"{name}\" không còn trong tài khoản {account}: bỏ lượt. Mở kịch bản chọn lại \"Đăng bằng\".",
+    "back_fail": "⚠️ Chưa chuyển về Cá nhân được: lượt sau tool tự chuyển lại.",
+    "not_member": "   ⏭ {name} chưa vào nhóm {group}: bỏ nhóm này, không đăng bằng Cá nhân thay.",
+    "read": "👤 {account}: đọc được Cá nhân + {pages} Page.",
+    "page_join": "Xin vào / rời nhóm bằng Page: chưa hỗ trợ – tool chỉ xin vào / rời bằng Cá nhân.",
+}
+
+
+class IdentitySwitchFailed(RuntimeError):
+    """Khong chuyen duoc sang danh tinh can dung -> luot do KHONG dang / binh luan gi.
+
+    identity_id: "self" | id Page; name: ten danh tinh; reason: ly do (khong dau, de in log);
+    shot: ten file anh loi trong anh_loi/ ("" neu khong chup duoc).
+    note_text: dong nhat ky dung nguyen van -> fb_login.note(BASE_DIR, error.note_text).
+    """
+
+    def __init__(self, identity_id, name, reason="", shot=""):
+        super().__init__(f"Khong chuyen duoc sang danh tinh {identity_id} ({reason})")
+        self.identity_id, self.name, self.reason, self.shot = identity_id, name, reason, shot
+
+    @property
+    def note_text(self):
+        shot = IDENTITY_NOTES["shot"].format(file=self.shot) if self.shot else ""
+        return IDENTITY_NOTES["fail"].format(name=self.name or self.identity_id, shot=shot)
+
+
+def identity_dir(acc_dir, identity_id):
+    """Thu muc du lieu cua danh tinh (cac file IDENTITY_FILES nam o day).
+
+    Vao: acc_dir = accounts/<id> cua nick; identity_id = "self" | "" | None | id Page (chi chu so).
+    Ra: Path. "self" / "" / None -> chinh acc_dir (giu nguyen file cu, khong chuyen du lieu);
+        id Page -> acc_dir / "danh_tinh" / <id Page> (tao thu muc neu chua co).
+    Loi: ValueError neu identity_id khong phai "self" va khong phai toan chu so (chan duong dan la).
+    Ghi chu: progress (kiem_tra_tien_do.json), khoa, tam nghi, status, fb_profile van dung acc_dir.
+    """
+    raise NotImplementedError
+
+
+def current_identity(page):
+    """Danh tinh Chrome dang dung, doc cookie (KHONG mo trang, khong bam gi).
+
+    Vao: page Playwright da mo facebook.com.
+    Ra: gia tri cookie i_user (id Page, chuoi so) neu co; khong co i_user -> "self".
+    Loi: khong raise (doc cookie loi -> "self"). Khong in gia tri cookie nao khac ra log.
+    """
+    raise NotImplementedError
+
+
+def read_identities(page):
+    """Doc danh sach danh tinh cua nick tu menu tai khoan (plan 003 muc 3b).
+
+    Vao: page da dang nhap (dang o danh tinh nao cung duoc).
+    Ra: [{"id": "self", "name": <ten ca nhan>, "kind": "self"},
+         {"id": <i_user>, "name": <ten Page>, "kind": "page"}, ...] - Ca nhan luon dung dau, toi da
+         READ_IDENTITIES_MAX Page. Id Page lay tu trang neu doc duoc, khong thi chuyen sang Page do de doc cookie
+         i_user (moi Page ~IDENTITY_SWITCH_WAIT giay). Luon ket thuc o Ca nhan (back_to_self trong finally).
+    Loi: khong mo duoc menu / khong doc duoc ten ca nhan -> RuntimeError. Facebook bao gioi han -> RuntimeError
+         co chu "rate_limited" (nguoi goi pause_nick).
+    """
+    raise NotImplementedError
+
+
+def switch_identity(page, identity_id, name):
+    """Chuyen ca trang sang danh tinh `identity_id` (ten `name`) nhu nguoi that.
+
+    Vao: identity_id "self" | id Page; name = ten hien tren nut "Chuyen sang <name>".
+    Lam: current_identity(page) == identity_id -> KHONG bam gi, tra True. Khong thi mo menu tai khoan
+         (ACCOUNT_MENU_LABELS), bam nut role=button "Chuyển sang <name>" (khong co -> "Xem tất cả trang cá nhân" ->
+         hop "Chọn trang cá nhân" -> nut "<name>, ..."), cho IDENTITY_SWITCH_WAIT giay, kiem lai bang
+         current_identity() toi da IDENTITY_SWITCH_TIMEOUT giay.
+    Ra: True neu sau cung current_identity(page) == identity_id; False neu khong.
+    Loi: khong raise (moi loi Playwright -> False).
+    """
+    raise NotImplementedError
+
+
+def ensure_identity(page, identity_id, name, shot_dir=None):
+    """Bao dam Chrome dang o dung danh tinh truoc khi dang / quet / binh luan / doc ket qua.
+
+    Vao: nhu switch_identity; shot_dir = thu muc anh loi (vd BASE_DIR / "anh_loi") hoac None (khong chup).
+    Ra: None khi da dung danh tinh (ke ca "self" luc khong co i_user -> khong thao tac gi tren Facebook).
+    Loi: IdentitySwitchFailed(identity_id, name, reason, shot) neu switch_identity tra False; chup anh
+         <yyyymmdd_HHMMSS>_danh_tinh.png vao shot_dir truoc khi raise. Nguoi goi: ghi error.note_text,
+         KHONG dang / binh luan, bo luot (ma thoat 0), back_to_self trong finally.
+    """
+    raise NotImplementedError
+
+
+def back_to_self(page, self_name=""):
+    """Chuyen ve Ca nhan (goi trong finally cua MOI luot, truoc context.close()).
+
+    Vao: self_name = ten ca nhan (account_status.read_profile(acc_dir)["name"]) - "" thi tu tim nut
+         "Chuyển sang ..." tro ve ca nhan.
+    Ra: True neu da o Ca nhan (khong co i_user: tra True ngay, khong thao tac); False neu chuyen khong duoc
+        (nguoi goi ghi IDENTITY_NOTES["back_fail"]; luot sau ensure_identity tu sua).
+    Loi: KHONG BAO GIO raise (dung trong finally).
+    """
+    raise NotImplementedError
+
+
+def load_identities_file(acc_dir):
+    """Ket qua lan --read-identities gan nhat cua nick (accounts/<id>/danh_tinh.json).
+
+    Ra: {"time": epoch (0 neu chua doc), "identities": [... nhu read_identities ...]}. Loi doc file -> mac dinh.
+    """
+    raise NotImplementedError
+
+
+def save_identities_file(acc_dir, identities):
+    """Ghi accounts/<id>/danh_tinh.json = {"time": now, "identities": identities}. Loi ghi -> bo qua."""
+    raise NotImplementedError
 
 
 # ------------------------------------------------------------------ trang thai + dang xuat

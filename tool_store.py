@@ -59,6 +59,9 @@ def load():
         data = {"accounts": []}
     for account in data.setdefault("accounts", []):
         _fill(account, ACCOUNT_DEFAULTS)
+        # Task 003: [{"id": "self"|<id Page>, "name", "kind": "self"|"page", "missing"?: bool}].
+        # [] (config cu / chua bam 'Doc danh sach Page') = chi co Ca nhan, xem account_identities().
+        account.setdefault("identities", [])
         for campaign in account.setdefault("campaigns", []):
             campaign.setdefault("kind", POST)
             _fill(campaign, defaults_of(campaign["kind"]))
@@ -76,6 +79,7 @@ def load():
         s.setdefault("members", {})
         s.setdefault("gap_minutes", DEFAULT_GAP)
         s.setdefault("member_times", {})   # {id tai khoan: [gio rieng]} - de trong = gio chung + gian cach
+        s.setdefault("post_as", {})        # task 003: {id tai khoan: id danh tinh} - thieu = "self" (Ca nhan)
         if s["kind"] == MONITOR and "scan_minutes" not in s.setdefault("settings", {}):
             # Chu ky quet chuyen tu tai khoan sang kich ban (23/10/2026): lay chu ky dang dat o tai khoan chay no.
             olds = [a.get("run_every_minutes") for a in data["accounts"] if a["id"] in s["accounts"]]
@@ -130,7 +134,7 @@ def new_id(data, prefix):
 
 
 def new_account(data, name):
-    return dict(ACCOUNT_DEFAULTS, id=new_id(data, "a"), name=name, campaigns=[])
+    return dict(ACCOUNT_DEFAULTS, id=new_id(data, "a"), name=name, campaigns=[], identities=[])
 
 
 def new_campaign(data, name, kind):
@@ -151,13 +155,14 @@ def shift_times(times, minutes):
 # fb_monitor_v4.py, setup.ps1 van doc accounts[].campaigns[] nhu cu.
 SCENARIO_PREFIX = "k"
 MEMBER_KEYS = ("id", "name", "kind", "enabled", "scenario")      # khong nam trong settings
+PER_MEMBER_KEYS = ("post_as", "post_as_name")   # task 003: rieng tung tai khoan (kich ban["post_as"]), khong o settings
 CONTENT_KEYS = ("share_text", "media_folder", "media_count", "media_count_max")
 DEFAULT_GAP = 15
 migrated = False   # load() vua chuyen du lieu cu sang kich ban (giao dien luu ngay de giu id kich ban)
 
 
 def settings_defaults(kind):
-    return {k: v for k, v in defaults_of(kind).items() if k != "enabled"}
+    return {k: v for k, v in defaults_of(kind).items() if k != "enabled" and k not in PER_MEMBER_KEYS}
 
 
 def drop_library(data):
@@ -186,7 +191,7 @@ def new_scenario(data, name, kind):
     settings = {}
     _fill(settings, settings_defaults(kind))
     return {"id": new_id(data, SCENARIO_PREFIX), "name": name, "kind": kind, "enabled": True,
-            "accounts": [], "gap_minutes": DEFAULT_GAP, "members": {}, "settings": settings}
+            "accounts": [], "gap_minutes": DEFAULT_GAP, "members": {}, "post_as": {}, "settings": settings}
 
 
 def find_scenario(data, scenario_id):
@@ -238,7 +243,12 @@ def resolved_settings(data, scenario):
 
 
 def materialize(data):
-    """Sinh lai accounts[].campaigns[] tu kich ban (goi truoc khi kiem tra / luu)."""
+    """Sinh lai accounts[].campaigns[] tu kich ban (goi truoc khi kiem tra / luu).
+
+    Task 003 (Dev B): moi muc sinh ra them item["post_as"] = scenario["post_as"].get(id tai khoan, "self") va
+    item["post_as_name"] = identity_name(tai khoan, post_as) ("" voi Ca nhan). Id khong con trong tai khoan van giu
+    nguyen (luot chay se bao IDENTITY_NOTES["missing"] va bo luot, KHONG doi sang Ca nhan).
+    """
     built = {a["id"]: [] for a in data["accounts"]}
     for s in data["scenarios"]:
         s["accounts"] = [aid for aid in s["accounts"] if aid in built]
@@ -269,7 +279,7 @@ def migrate_to_scenarios(data):
             s = {"id": new_id(data, SCENARIO_PREFIX), "name": c.get("name", ""), "kind": kind_of(c),
                  "enabled": bool(c.get("enabled", True)), "accounts": [account["id"]], "gap_minutes": DEFAULT_GAP,
                  "members": {account["id"]: c["id"]},
-                 "settings": {k: v for k, v in c.items() if k not in MEMBER_KEYS}}
+                 "settings": {k: v for k, v in c.items() if k not in MEMBER_KEYS + PER_MEMBER_KEYS}}
             data["scenarios"].append(s)
             c["scenario"] = s["id"]
 
@@ -278,7 +288,7 @@ def duplicate_scenario(data, scenario):
     """Nhan ban kich ban: cung noi dung / nhom / gio, chua tick tai khoan nao."""
     item = json.loads(json.dumps(scenario))
     item.update(id=new_id(data, SCENARIO_PREFIX), name=f"{scenario['name']} (bản sao)", accounts=[], members={},
-                member_times={})
+                member_times={}, post_as={})
     if scenario["kind"] == MONITOR:
         for f in scenario_images(data, scenario):
             shutil.copy2(f, campaign_dir(item["id"]) / f.name)
@@ -299,6 +309,91 @@ def remove_account_everywhere(data, account_id):
     for s in data["scenarios"]:
         if account_id in s["accounts"]:
             s["accounts"].remove(account_id)
+
+
+# ------------------------------------------------------------------ danh tinh + gop tai khoan (task 003)
+# Hop dong: plans/003_mot_nick_nhieu_page.md muc 3. Du lieu theo danh tinh: fb_login.identity_dir().
+MERGE_MARKER = "da_gop.json"                     # accounts/<id phu>/da_gop.json {"into", "identity", "time"}
+MERGE_BACKUP = "config.truoc_gop_{stamp}.json"   # ban sao config.json truoc khi gop (o BASE_DIR)
+
+
+def account_identities(account):
+    """Danh tinh cua tai khoan, Ca nhan luon dung dau.
+
+    Vao: account (dict trong config). Ra: list dict {"id", "name", "kind"[, "missing"]}.
+    account["identities"] rong / thieu muc "self" -> them {"id": "self", "name": <ten ca nhan>, "kind": "self"} o dau
+    (ten: muc self da luu, khong co thi fb_profile.json, khong co nua thi account["name"]). Khong sua account.
+    Loi: khong raise.
+    """
+    raise NotImplementedError
+
+
+def identity_name(account, identity_id):
+    """Ten danh tinh `identity_id` cua tai khoan ("self" -> ten ca nhan). Khong co -> "" (khong raise)."""
+    raise NotImplementedError
+
+
+def update_identities(account, found):
+    """Gop ket qua 'Doc danh sach Page' (fb_login.read_identities / load_identities_file) vao account["identities"].
+
+    Vao: found = list nhu fb_login.read_identities. Lam: giu thu tu cu, cap nhat ten theo id, them Page moi o cuoi;
+    Page cu khong con trong `found` -> GIU LAI + "missing": True (kich ban con tro toi); thay lai -> bo "missing".
+    Ra: {"added": [ten], "renamed": [(cu, moi)], "missing": [ten]}. Loi: found rong / khong co "self" -> ValueError.
+    """
+    raise NotImplementedError
+
+
+def same_uid_groups(data):
+    """Cac nhom tai khoan trong tool CUNG 1 nick Facebook (cung uid trong accounts/<id>/fb_profile.json).
+
+    Ra: [[id tai khoan, ...], ...] - moi nhom >= 2 tai khoan, theo thu tu tren giao dien (thu tu data["accounts"]);
+    tai khoan chua biet uid -> khong tinh. Khong co -> []. Loi doc file -> bo qua tai khoan do.
+    """
+    raise NotImplementedError
+
+
+def merge_plan(data, main_id, other_ids):
+    """Xem truoc viec gop (KHONG sua gi) -> noi dung hop xac nhan.
+
+    Vao: main_id = tai khoan chinh (giu Chrome); other_ids = tai khoan phu cung uid (se thanh danh tinh cua main).
+    Ra: {"ok": bool, "errors": [chu co dau], "main": main_id,
+         "mapping": {id phu: id danh tinh cua main},   # ten fb_profile cua tk phu khop ten danh tinh (khong phan
+                                                        # biet hoa thuong / dau cach) - khop ten ca nhan -> "self"
+         "scenarios": [{"id", "name", "action": "doi" | "tach" | "bo_trung", "account": id phu, "identity": id}],
+         "copies": [[duong dan nguon, duong dan dich], ...],   # IDENTITY_FILES -> fb_login.identity_dir(main, id)
+         "logout": [id phu], "backup": ten file MERGE_BACKUP, "lines": [chu co dau cho hop xac nhan]}
+    errors (ok=False): khac uid; tk phu khong co ten; khong thay Page cung ten trong danh tinh cua main
+    ("Không thấy Page '<tên>' trong danh sách của '<main>' – bấm 'Đọc danh sách Page' ở tài khoản chính trước.").
+    Loi: main_id / id phu khong co trong data -> ValueError.
+    """
+    raise NotImplementedError
+
+
+def merge_accounts(data, main_id, other_ids, stamp, plan=None):
+    """Gop tai khoan phu vao tai khoan chinh (sau khi nguoi dung bam Gop trong hop xac nhan).
+
+    Vao: plan = ket qua merge_plan (None -> tu tinh); stamp = chuoi thoi gian (vd '20261025_1530') cho ten backup.
+    Lam (theo thu tu, plan["ok"] False -> khong lam gi):
+      1. Chep config.json -> BASE_DIR / MERGE_BACKUP.format(stamp=stamp).
+      2. Chep du lieu: moi file IDENTITY_FILES cua accounts/<phu>/ -> identity_dir(accounts/<main>, id) (dich da co
+         -> gop: ket_qua.json dung chuyen_du_lieu.merge_results, json dang {khoa: ...} giu ban dich + them khoa
+         thieu, file .txt gop dong); commented_ids.txt gop vao accounts/<main>/; tk phu dang tam nghi lau hon ->
+         tai khoan chinh nghi toi cung luc. KHONG xoa / sua gi trong accounts/<phu>/ (ngoai MERGE_MARKER).
+      3. Kich ban tick tk phu: "doi" = thay bang main o cung vi tri, members / member_times chuyen sang main,
+         post_as[main] = id; "bo_trung" = main da tick cung danh tinh -> bo tk phu; "tach" = main da tick bang danh
+         tinh khac -> tao kich ban moi '<ten> (<ten danh tinh>)' chi tick main, giu id muc cu cua tk phu.
+      4. Xoa tk phu khoi data["accounts"]; ghi accounts/<phu>/MERGE_MARKER.
+    Ra: plan + {"done": True}. Nguoi goi (giao dien): save(data) -> chay '--logout --account <phu>' tung tk phu
+        (dang xuat Facebook + xoa browser_profile) -> cap nhat lich.
+    Loi: OSError khi chep -> raise (config chua luu, backup con nguyen). ValueError nhu merge_plan.
+    """
+    raise NotImplementedError
+
+
+def merged_leftovers(data):
+    """Tai khoan da gop nhung Chrome chua dang xuat / xoa duoc: thu muc accounts/<id> co MERGE_MARKER + browser_profile,
+    id khong con trong data["accounts"]. Ra: [id]. Giao dien hien canh bao + nut thu lai '--logout'."""
+    raise NotImplementedError
 
 
 # ---- anh binh luan cua kich ban theo doi: campaigns/<id kich ban>/ (co thu muc = chinh thuc),

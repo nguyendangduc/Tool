@@ -49,6 +49,9 @@ CAMPAIGN_DEFAULTS = {
     "weekdays": [],         # thu duoc quet (0 = Thu 2 ... 6 = CN); de trong = hang ngay (giong ben dang bai)
     "scan_minutes": 40,     # quet moi N phut - dat o kich ban, moi tai khoan cua kich ban dung chung
     "comment_media_folder": "",   # thu muc anh: moi binh luan lay ngau nhien 1 anh (thay anh1 / anh2 co dinh)
+    # Task 003: danh tinh quet + binh luan cua muc nay - tool_store.materialize() ghi tu kich ban["post_as"].
+    "post_as": "self",      # "self" = Ca nhan; chuoi so = id Page (cookie i_user), xem fb_login.ensure_identity
+    "post_as_name": "",     # ten danh tinh (de bam 'Chuyen sang <ten>'); "" voi Ca nhan
 }
 
 # Cach quet - co dinh, khong cho sua tren giao dien.
@@ -191,8 +194,12 @@ def pause_notes(account, campaign):
     return notes
 
 
-def reset_pause(account, kind, key):
-    """Nut Reset: bo nghi thu cong (nhom: tinh lai tu dau, lan nghi sau lai tu 3 ngay)."""
+def reset_pause(account, kind, key, identity="self"):
+    """Nut Reset: bo nghi thu cong (nhom: tinh lai tu dau, lan nghi sau lai tu 3 ngay).
+
+    identity (task 003): binh_luan_loi.json nam o fb_login.identity_dir(acc_dir, identity); tam nghi CA nick
+    ('account') van o acc_dir. (Khung: chua dung.)
+    """
     import fb_login
     folder = ACCOUNTS_DIR / account["id"]
     if kind == "account":
