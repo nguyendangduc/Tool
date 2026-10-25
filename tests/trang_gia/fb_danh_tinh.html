@@ -1,0 +1,132 @@
+<!doctype html>
+<!-- Trang Facebook GIA cho test task 003 (plan 003 muc 3b). Khong lien quan Facebook that.
+     Test phuc vu trang nay tai https://www.facebook.com/ bang context.route (moi request bi chan, khong ra mang).
+     Danh tinh dang dung = cookie i_user (co = Page, khong co = Ca nhan). Chuyen danh tinh = JS dat / xoa i_user
+     roi tai lai trang (nhu Facebook that, ~8 giay -> o day 300 ms).
+     Cookie dieu khien (test dat bang context.add_cookies):
+       gia_mode=hong      -> bam "Chuyen sang ..." khong doi gi (gia lap chuyen that bai)
+       gia_mode=mot_page  -> nick chi co 1 Page (menu khong co "Xem tat ca trang ca nhan")
+     Dem thao tac: window.giaDem(ten) (test expose_binding o muc context): "menu" = mo menu tai khoan,
+     "chuyen" = bam nut chuyen danh tinh, "xem_tat_ca" = mo hop "Chon trang ca nhan". -->
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<title>Facebook</title>
+<style>
+  body { font-family: sans-serif; }
+  .an { display: none; }
+  [role=dialog] { border: 1px solid #888; padding: 8px; margin: 8px; background: #fff; }
+  [role=button] { display: block; padding: 4px 8px; margin: 2px; cursor: pointer; border: 1px solid #ccc; }
+  #nut_tk { display: inline-block; }
+</style>
+</head>
+<body>
+<div role="banner" id="banner">
+  <!-- Nhan cu "Trang ca nhan cua ban" gio chi con tren svg (KHONG bam duoc) - muc 3b -->
+  <svg aria-label="Trang cá nhân của bạn" width="20" height="20"><circle cx="10" cy="10" r="8"></circle></svg>
+  <div role="button" tabindex="0" aria-label="Account, your profile" id="nut_tk">
+    <svg width="24" height="24"><circle cx="12" cy="12" r="10"></circle></svg>
+  </div>
+</div>
+<div role="main" id="main"><h1 id="dang_dung"></h1></div>
+<div id="hop"></div>
+<!-- Luon co 1 hop Messenger AN (dat sau hop menu: chon div[role=dialog].last la sai) -->
+<div role="dialog" aria-label="Messenger" class="an">
+  <div>Messenger</div>
+  <div role="button" id="mess_btn">Chuyển sang Messenger</div>
+</div>
+<script>
+(function () {
+  var CA_NHAN = { id: "self", name: "Nguyễn Văn Test" };
+  var PAGES_ALL = [
+    { id: "61595395697904", name: "HTX chó mèo", n: 2 },
+    { id: "61500000000002", name: "Thư Tình", n: 0 }
+  ];
+
+  function getCookie(name) {
+    var parts = document.cookie.split("; ");
+    for (var i = 0; i < parts.length; i++) {
+      var kv = parts[i].split("=");
+      if (kv[0] === name) return decodeURIComponent(kv.slice(1).join("="));
+    }
+    return "";
+  }
+  function dem(ten) { try { if (window.giaDem) window.giaDem(ten); } catch (e) {} }
+
+  var mode = getCookie("gia_mode");
+  var pages = mode.indexOf("mot_page") >= 0 ? PAGES_ALL.slice(0, 1) : PAGES_ALL;
+  var all = [CA_NHAN].concat(pages);
+  var iu = getCookie("i_user");
+  var cur = CA_NHAN;
+  for (var i = 0; i < pages.length; i++) if (pages[i].id === iu) cur = pages[i];
+  document.getElementById("dang_dung").textContent = cur.name;
+
+  var hop = document.getElementById("hop");
+  function closeAll() { hop.innerHTML = ""; }
+
+  function makeButton(label, text, onClick) {
+    var b = document.createElement("div");
+    b.setAttribute("role", "button");
+    b.setAttribute("tabindex", "0");
+    if (label) b.setAttribute("aria-label", label);
+    b.textContent = text;
+    b.addEventListener("click", function (ev) { ev.stopPropagation(); onClick(); });
+    b.addEventListener("keydown", function (ev) { if (ev.key === "Enter") { ev.stopPropagation(); onClick(); } });
+    return b;
+  }
+
+  function switchTo(target) {
+    dem("chuyen");
+    closeAll();
+    if (mode.indexOf("hong") >= 0) return;   // gia lap: bam nhung Facebook khong chuyen
+    if (target.id === "self") {
+      document.cookie = "i_user=; path=/; domain=.facebook.com; expires=Thu, 01 Jan 1970 00:00:00 GMT";
+    } else {
+      document.cookie = "i_user=" + target.id + "; path=/; domain=.facebook.com; secure";
+    }
+    setTimeout(function () { location.reload(); }, 300);
+  }
+
+  function openAll() {
+    dem("xem_tat_ca");
+    closeAll();
+    var d = document.createElement("div");
+    d.setAttribute("role", "dialog");
+    d.setAttribute("aria-label", "Chọn trang cá nhân");
+    var h = document.createElement("h2");
+    h.textContent = "Chọn trang cá nhân";
+    d.appendChild(h);
+    all.forEach(function (x) {
+      var label = x.name + ", " + (x.n || 0) + " thông báo" + (x === cur ? ", đang chọn" : "");
+      d.appendChild(makeButton(label, x.name, function () { if (x !== cur) switchTo(x); else closeAll(); }));
+    });
+    hop.appendChild(d);
+  }
+
+  function openMenu() {
+    dem("menu");
+    closeAll();
+    var d = document.createElement("div");
+    d.setAttribute("role", "dialog");
+    d.setAttribute("aria-label", "Tài khoản của bạn");
+    var top = document.createElement("div");
+    top.textContent = cur.name;   // dong dau menu = ten danh tinh dang dung
+    d.appendChild(top);
+    // Facebook that: dang o Ca nhan -> nut chuyen sang Page dau; dang o Page -> nut chuyen ve Ca nhan.
+    var other = cur === CA_NHAN ? pages[0] : CA_NHAN;
+    if (other) d.appendChild(makeButton("", "Chuyển sang " + other.name, function () { switchTo(other); }));
+    if (pages.length >= 2) d.appendChild(makeButton("", "Xem tất cả trang cá nhân", openAll));
+    d.appendChild(makeButton("", "Cài đặt và quyền riêng tư", function () {}));
+    d.appendChild(makeButton("", "Đăng xuất", function () {}));
+    hop.appendChild(d);
+  }
+
+  var nut = document.getElementById("nut_tk");
+  nut.addEventListener("click", function (ev) { ev.stopPropagation(); openMenu(); });
+  nut.addEventListener("keydown", function (ev) { if (ev.key === "Enter") openMenu(); });
+  document.addEventListener("keydown", function (ev) { if (ev.key === "Escape") closeAll(); });
+  document.addEventListener("click", function (ev) { if (!hop.contains(ev.target)) closeAll(); });
+})();
+</script>
+</body>
+</html>
