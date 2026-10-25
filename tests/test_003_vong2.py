@@ -162,6 +162,20 @@ def test_post_to_all_groups_dung_khi_danh_tinh_doi(tmp_path, monkeypatch):
     assert posted == ["https://www.facebook.com/groups/1/"]           # nhom 2 KHONG dang
 
 
+# ------------------------------------------------------------------ chon danh tinh trong hop 'Tham gia voi tu cach'
+@pytest.mark.parametrize("labels, want, expect", [
+    (["Nguyễn A", "HTX chó mèo", "HTX"], "HTX", 2),             # review vong 2 loi C: trung khop hoan toan truoc
+    (["Lan Anh Shop", "Lan Anh"], "Lan Anh", 1),                # khong chon nham Ca nhan co ten bat dau giong Page
+    (["Nguyễn A", "HTX chó mèo"], "htx  CHÓ mèo", 1),           # bo dau cach thua, khong phan biet hoa thuong
+    (["Nguyễn A", "HTX chó mèo (Trang)"], "HTX chó mèo", 1),    # 'bat dau bang' khi chi 1 lua chon khop
+    (["HTX chó mèo 1", "HTX chó mèo 2"], "HTX chó mèo", None),  # 2 lua chon cung 'bat dau bang' -> khong doan
+    (["Nguyễn A"], "HTX", None),
+    (["Nguyễn A", "HTX"], "", None),
+])
+def test_pick_join_as(labels, want, expect):
+    assert fb_login._pick_join_as(labels, want) == expect
+
+
 # ------------------------------------------------------------------ gioi han xin vao ca nick
 def test_nick_join_usage_cong_moi_danh_tinh(tmp_path):
     d = acc(tmp_path)

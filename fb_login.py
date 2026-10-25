@@ -1305,17 +1305,32 @@ _RADIO_LABEL_JS = r"""e => {
 }"""
 
 
-def _label_matches(label, as_name):
-    norm = lambda s: re.sub(r"\s+", " ", unicodedata.normalize("NFC", s or "")).strip().casefold()
-    label, want = norm(label), norm(as_name)
-    return bool(want) and (label == want or label.startswith(want))
+def _norm_label(s):
+    return re.sub(r"\s+", " ", unicodedata.normalize("NFC", s or "")).strip().casefold()
+
+
+def _pick_join_as(labels, as_name):
+    """Chi so lua chon danh tinh trong hop 'Tham gia voi tu cach' (review vong 2 loi C): uu tien nhan TRUNG KHOP
+    hoan toan; khong co thi 'bat dau bang' CHI khi dung 1 lua chon khop; 0 hoac >= 2 -> None (khong doan)."""
+    want = _norm_label(as_name)
+    if not want:
+        return None
+    norm = [_norm_label(x) for x in labels]
+    exact = [i for i, x in enumerate(norm) if x == want]
+    if len(exact) == 1:
+        return exact[0]
+    if exact:
+        return None
+    prefix = [i for i, x in enumerate(norm) if x.startswith(want)]
+    return prefix[0] if len(prefix) == 1 else None
 
 
 def _join_as_profile(page, dialog, as_name=None):
     """Hop 'Tham gia voi tu cach' (nick quan ly Trang) -> chon danh tinh -> Tiep tuc.
 
-    as_name None: chon lua chon DAU (trang ca nhan) nhu cu. Ten Page: chon lua chon co nhan bang / bat dau bang ten do
-    (bo dau cach thua, NFC, khong phan biet hoa thuong); "" hoac khong thay -> Escape, tra "missing".
+    as_name None: chon lua chon DAU (trang ca nhan) nhu cu. Ten Page: _pick_join_as (trung khop hoan toan truoc;
+    'bat dau bang' chi khi duy nhat; bo dau cach thua, NFC, khong phan biet hoa thuong); "" / khong thay / nhieu lua
+    chon cung khop -> Escape, tra "missing".
     Ra: True da chon + bam Tiep tuc; False khong bam duoc; "missing" khong thay danh tinh can chon.
     """
     try:
@@ -1325,15 +1340,12 @@ def _join_as_profile(page, dialog, as_name=None):
                 radios.first.click(force=True)
                 page.wait_for_timeout(600)
         else:
-            target = None
-            for i in range(radios.count()):
-                if _label_matches(radios.nth(i).evaluate(_RADIO_LABEL_JS), as_name):
-                    target = radios.nth(i)
-                    break
-            if target is None:
+            labels = [radios.nth(i).evaluate(_RADIO_LABEL_JS) for i in range(radios.count())]
+            index = _pick_join_as(labels, as_name)
+            if index is None:
                 page.keyboard.press("Escape")
                 return "missing"
-            target.click(force=True)
+            radios.nth(index).click(force=True)
             page.wait_for_timeout(600)
         button = dialog.get_by_role("button", name=_CONTINUE_BTN).last
         if not button.count():

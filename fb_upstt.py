@@ -1395,7 +1395,8 @@ def main():
             switched = fb_login.check_results_cli(
                 acc_dir, slugs,
                 lambda: open_account_context(playwright, account["id"], headless=True, wait_minutes=25),
-                note=lambda t: fb_login.note(BASE_DIR, t), identity={"id": ident, "name": ident_name})
+                note=lambda t: fb_login.note(BASE_DIR, t),
+                identity={"id": ident, "name": ident_name, "account_name": account["name"]})
         # Cap nhat bang tay xong -> tu cham bai moi duoc duyet (muc co noi dung 'Cham bai').
         fb_login.release_nick(acc_dir)
         if switched is False:   # khong chuyen duoc danh tinh -> khong cham bai bang danh tinh do

@@ -1522,23 +1522,23 @@ class MonitorKind:
 
     def member_kpis(self, app, s, account, item):
         groups = item.get("groups", [])
-        joined = self.g.joined_count(account["id"], groups)
+        joined = self.g.joined_count(account["id"], groups, item.get("post_as") or "self")
         found, _skipped = self.leads(item, 7)
         return [(f"{store.monitor_store.scan_minutes(item)} phút", "quét mỗi (đặt ở kịch bản)", None),
                 (f"{joined}/{len(groups)}", "nhóm đã vào", ui.GREEN if joined == len(groups) and groups else ui.AMBER),
                 (len(found), "khách tìm được (7 ngày)", ui.AMBER),
-                (self.g.sent_7days(app, account, groups, "comment"), "bình luận đã gửi (7 ngày)", "#1d4ed8")]
+                (self.g.sent_7days(app, account, groups, "comment", item), "bình luận đã gửi (7 ngày)", "#1d4ed8")]
 
     def member_columns(self, app, s, account):
         return (f"mỗi {store.monitor_store.scan_minutes(s['settings'])} phút",
-                self.g.membership_text(account["id"], s["settings"].get("groups", [])))
+                self.g.membership_text(account["id"], s["settings"].get("groups", []), post_as(s, account["id"])))
 
     def member_info(self, app, s, account):
         return (f"quét mỗi {store.monitor_store.scan_minutes(s['settings'])} phút (đặt ở kịch bản)  ·  "
-                f"{self.g.membership_text(account['id'], s['settings'].get('groups', []))}")
+                f"{self.g.membership_text(account['id'], s['settings'].get('groups', []), post_as(s, account['id']))}")
 
     def member_summary(self, app, s, account, item):
-        return (f"Tài khoản này quét {self.g.membership_text(account['id'], item['groups'])} mỗi "
+        return (f"Tài khoản này quét {self.g.membership_text(account['id'], item['groups'], item.get('post_as') or 'self')} mỗi "
                 f"{store.monitor_store.scan_minutes(item)} phút ({upstt_store.weekdays_text(item.get('weekdays'))}). "
                 "Nhóm, từ khoá, bình luận, chu kỳ quét: sửa ở kịch bản (nút ✎ bên phải).")
 
