@@ -262,7 +262,9 @@ def materialize(data):
             item.update(id=cid, name=s["name"], kind=s["kind"], enabled=bool(s["enabled"]), scenario=s["id"])
             post_as = str((s.get("post_as") or {}).get(account["id"]) or SELF)
             item["post_as"] = post_as
-            item["post_as_name"] = "" if post_as == SELF else identity_name(account, post_as)
+            # Page khong con / 'missing' -> ten "" -> luot chay bo ngay, khong thao tac Facebook (muc 3.10d).
+            hit = next((x for x in account_identities(account) if str(x.get("id")) == post_as), None)
+            item["post_as_name"] = "" if post_as == SELF or not hit or hit.get("missing") else hit.get("name", "")
             if s["kind"] == POST:
                 item["times"] = (custom_member_times(s, account["id"])
                                  or shift_times(item.get("times", []), int(s.get("gap_minutes") or 0) * i))
@@ -318,7 +320,8 @@ def remove_account_everywhere(data, account_id):
 # ------------------------------------------------------------------ danh tinh + gop tai khoan (task 003)
 # Hop dong: plans/003_mot_nick_nhieu_page.md muc 3. Du lieu theo danh tinh: fb_login.identity_dir().
 MERGE_MARKER = "da_gop.json"                     # accounts/<id phu>/da_gop.json {"into", "identity", "time"}
-MERGE_BACKUP = "config.truoc_gop_{stamp}.json"   # ban sao config.json truoc khi gop (o BASE_DIR)
+MERGE_BACKUP_DIR = "sao_luu"   # thu muc con (dong_goi.ps1 chi chep file o goc -> khong bao gio vao ban gui khach)
+MERGE_BACKUP = MERGE_BACKUP_DIR + "/config.truoc_gop_{stamp}.json"   # ban sao config.json truoc khi gop
 SELF = "self"                                    # = fb_login.IDENTITY_SELF (khong import fb_login o dau file)
 IDENTITY_DIR_NAME = "danh_tinh"                  # = fb_login.IDENTITY_DIR_NAME (chi de xem truoc duong dan)
 
@@ -454,9 +457,13 @@ def default_merge_main(data, ids):
     accounts = [find_account(data, i) for i in ids]
     selves = {_norm_name(x.get("name")) for a in accounts if a for x in (a.get("identities") or [])
               if isinstance(x, dict) and str(x.get("id")) == SELF and x.get("name")}
-    for a in accounts:
-        if a and _norm_name(_profile(a["id"]).get("name")) in selves:
+    # Tai khoan Page kieu cu (fb_profile.json co page_id) khong bao gio la tai khoan chinh (muc 3.10b).
+    personal = [a for a in accounts if a and not _profile(a["id"]).get("page_id")]
+    for a in personal:
+        if _norm_name(_profile(a["id"]).get("name")) in selves:
             return a["id"]
+    if personal:
+        return personal[0]["id"]
     return ids[0] if ids else None
 
 
@@ -498,19 +505,32 @@ def merge_plan(data, main_id, other_ids):
     main_uid = str(_profile(main_id).get("uid") or "")
     identities = account_identities(main)
     names = {x["id"]: x.get("name", "") for x in identities}
+    if _profile(main_id).get("page_id"):
+        errors.append(f"'{main['name']}' đang ở Page '{_profile(main_id).get('name', '')}' (tài khoản Page kiểu cũ) – "
+                      "chọn tài khoản Cá nhân của nick làm tài khoản chính.")
     for oid in others:
         other = find_account(data, oid)
         if not main_uid.isdigit() or str(_profile(oid).get("uid") or "") != main_uid:
             errors.append(f"'{other['name']}' không cùng nick Facebook với '{main['name']}' – không gộp được.")
             continue
         fb_name = _profile(oid).get("name", "")
-        if not _norm_name(fb_name):
-            errors.append(f"'{other['name']}' chưa có tên Facebook – bấm 'Kiểm tra đăng nhập' ở tài khoản đó trước.")
-            continue
-        hit = next((x["id"] for x in identities if _norm_name(x.get("name")) == _norm_name(fb_name)), None)
+        page_id = str(_profile(oid).get("page_id") or "")
+        if page_id:
+            # Muc 3.10b: ghep theo id Page truoc (ten co the da doi / trung ten Ca nhan).
+            hit = next((x["id"] for x in identities if str(x.get("id")) == page_id), None)
+        else:
+            if not _norm_name(fb_name):
+                errors.append(f"'{other['name']}' chưa có tên Facebook – bấm 'Kiểm tra đăng nhập' ở tài khoản đó trước.")
+                continue
+            hit = next((x["id"] for x in identities if _norm_name(x.get("name")) == _norm_name(fb_name)), None)
         if hit is None:
-            errors.append(f"Không thấy Page '{fb_name}' trong danh sách của '{main['name']}' – bấm 'Đọc danh sách "
-                          "Page' ở tài khoản chính trước.")
+            errors.append(f"Không thấy Page '{fb_name or page_id}' trong danh sách của '{main['name']}' – bấm 'Đọc danh "
+                          "sách Page' ở tài khoản chính trước.")
+            continue
+        if hit == SELF:
+            errors.append(f"'{other['name']}' đang là Cá nhân của nick (trùng '{main['name']}'), không phải Page → không "
+                          "gộp được. Nếu tài khoản này vốn đăng bằng Page: mở Chrome của nó, chuyển sang Page đó rồi bấm "
+                          "'Kiểm tra đăng nhập'; nếu chỉ là tài khoản trùng thì xoá tài khoản này.")
             continue
         mapping[oid] = hit
 
@@ -669,6 +689,7 @@ def merge_accounts(data, main_id, other_ids, stamp, plan=None):
     main_dir = ACCOUNTS_DIR / main_id
     # 1. backup (config.json that; chua co file -> ghi ban dang mo)
     backup = BASE_DIR / MERGE_BACKUP.format(stamp=stamp)
+    backup.parent.mkdir(parents=True, exist_ok=True)
     if CONFIG_JSON.exists():
         shutil.copy2(CONFIG_JSON, backup)
     else:
@@ -716,7 +737,7 @@ def merge_accounts(data, main_id, other_ids, stamp, plan=None):
     data["accounts"] = [a for a in data["accounts"] if a["id"] not in gone]
     for oid in gone:
         remove_account_everywhere(data, oid)
-    return dict(plan, done=True, backup=backup.name)
+    return dict(plan, done=True, backup=f"{MERGE_BACKUP_DIR}/{backup.name}")
 
 
 def merged_leftovers(data):
