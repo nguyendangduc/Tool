@@ -196,6 +196,10 @@ Ghi chú: đăng bài, theo dõi, chăm bài, kiểm kết quả của cùng m�
 
 | 11 | (Dev A) Xác minh nhóm khi đang là Page (`verify_one`: xem lại nhóm chờ duyệt, `--joined-groups`): có tự trả lời câu hỏi tham gia + bấm "Vẫy tay chào" bằng Page không? | Chặn (theo câu 2) | **(a) Cho Page làm như Cá nhân** – PM 25/10: "page vẫn làm như trang cá nhân bình thường" |
 
+| 12 | (Review vòng 1, lỗi 1) Tài khoản Page kiểu cũ (chưa Gộp, `identities` trống, Chrome đang ở Page – có `i_user`): bản mới làm gì? | A1: chạy như cũ bằng Page đó + nhật ký nhắc Gộp; KHÔNG BAO GIỜ tự chuyển về Cá nhân | **A1 – theo đề xuất** (PM 25/10) |
+| 13 | (Review vòng 1) Page `missing`: bỏ lượt ngay hay vẫn thử chuyển (~40 giây + ảnh lỗi)? | Bỏ lượt ngay, `post_as_name=""`, không thao tác Facebook | **Theo đề xuất** (PM 25/10) |
+| 14 | (Review vòng 1) Đọc lại cookie `i_user` trước MỖI bài đăng / bình luận, lệch thì dừng lượt | Làm | **Theo đề xuất** (PM 25/10) |
+
 ## 8. Tiến độ (chỉ Điều phối ghi)
 | Thời gian | Bước | Vai | Nhánh / commit | Kết quả |
 |---|---|---|---|---|
