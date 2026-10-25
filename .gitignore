@@ -12,6 +12,8 @@ soan_tin_cu.json
 giao_dien.json
 license.key
 *.pem
+# ban sao config.json luc Gop tai khoan (co token Telegram)
+sao_luu/
 
 # ---- du lieu chay / nhat ky ----
 log.txt

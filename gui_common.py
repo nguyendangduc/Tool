@@ -2734,7 +2734,10 @@ class TreeConfigApp:
             n_id = len(self.store.account_identities(account))
             entries.append((f"🎭 Cá nhân & Page ({n_id})", lambda p: self.identities_tab(p, account)))
         entries.append((f"📋 Kịch bản ({len(mine)})", lambda p: self.account_scenarios(p, account, mine)))
-        entries.append((f"👥 Nhóm đã vào ({len(joined['groups'])})", lambda p: self.joined_groups_tab(p, account)))
+        # Task 003 (3.10f): so nay la cua Ca nhan - nick co Page thi ghi ro, khong de lam so ca nick.
+        has_pages = hasattr(self.store, "account_identities") and len(self.store.account_identities(account)) > 1
+        entries.append((f"👥 Nhóm đã vào{' – Cá nhân' if has_pages else ''} ({len(joined['groups'])})",
+                        lambda p: self.joined_groups_tab(p, account)))
         entries.append(("⚙ Thiết lập", lambda p: self.account_settings_tab(p, account)))
         self.lazy_tabs(tabs, entries, "account")
 
@@ -2761,10 +2764,15 @@ class TreeConfigApp:
         from datetime import datetime
         acc_dir = self.account_dir(account)
         data = fb_login.load_joined_groups(acc_dir)
+        has_pages = hasattr(self.store, "account_identities") and len(self.store.account_identities(account)) > 1
+        who = "Cá nhân: " if has_pages else ""
         bar = ttk.Frame(parent)
         bar.pack(fill="x", pady=(0, 6))
-        ttk.Label(bar, text=(f"{len(data['groups'])} nhóm · đọc lúc {datetime.fromtimestamp(data['time']):%H:%M %d/%m}"
+        ttk.Label(bar, text=(f"{who}{len(data['groups'])} nhóm · đọc lúc {datetime.fromtimestamp(data['time']):%H:%M %d/%m}"
                              if data["time"] else "Chưa đọc danh sách nhóm lần nào."), style="Hint.TLabel").pack(side="left")
+        if has_pages:
+            ttk.Label(parent, text="Đây là nhóm của Cá nhân. Nhóm của từng Page: xem ở kịch bản đăng bằng Page đó "
+                                   "(bảng nhóm, cột trạng thái).", style="Hint.TLabel", wraplength=700).pack(anchor="w")
         runner = next((k for _key, k in self.all_kinds() if hasattr(k, "run_accounts")), None)
         if runner and self.account_usable(account):
             ttk.Button(bar, text="🔄 Đọc lại từ Facebook", command=lambda: runner.run_accounts(
