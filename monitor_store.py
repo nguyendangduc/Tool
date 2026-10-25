@@ -180,8 +180,10 @@ def pause_notes(account, campaign):
                       "reason": pause.get("reason", ""),
                       "text": f"Tài khoản '{account['name']}' nghỉ CẢ bình luận + đăng bài đến "
                               f"{fb_login.pause_text(pause)} – {pause.get('reason', '')}"})
+    # Task 003: nhom ngung binh luan theo danh tinh cua muc; tam nghi CA nick (o tren) van o acc_dir.
     try:
-        groups = json.loads((folder / "binh_luan_loi.json").read_text(encoding="utf-8")).get("groups", {})
+        id_folder = fb_login.identity_dir(folder, campaign.get("post_as") or "self")
+        groups = json.loads((id_folder / "binh_luan_loi.json").read_text(encoding="utf-8")).get("groups", {})
     except Exception:
         groups = {}
     mine = {m.group(1) for g in campaign.get("groups", []) for m in [re.search(r"/groups/([^/?#]+)", g)] if m}
@@ -198,15 +200,15 @@ def reset_pause(account, kind, key, identity="self"):
     """Nut Reset: bo nghi thu cong (nhom: tinh lai tu dau, lan nghi sau lai tu 3 ngay).
 
     identity (task 003): binh_luan_loi.json nam o fb_login.identity_dir(acc_dir, identity); tam nghi CA nick
-    ('account') van o acc_dir. (Khung: chua dung.)
+    ('account' / 'recovering') van o acc_dir.
     """
     import fb_login
     folder = ACCOUNTS_DIR / account["id"]
-    if kind == "account":
+    if kind in ("account", "recovering"):
         fb_login.clear_nick_pause(folder)
         return
-    path = folder / "binh_luan_loi.json"
     try:
+        path = fb_login.identity_dir(folder, identity or "self") / "binh_luan_loi.json"
         st = json.loads(path.read_text(encoding="utf-8"))
     except Exception:
         return
