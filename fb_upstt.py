@@ -505,7 +505,17 @@ def post_to_all_groups(
     group_switch_wait_ms=6000,
     acc_dir=None,
     media_pick=None,
+    nick_dir=None,
+    identity_name="",
+    expect_identity=None,
 ):
+    """acc_dir: thu muc du lieu DANH TINH (fb_login.identity_dir) - trang thai nhom, ket qua, xac minh.
+    nick_dir: thu muc cua NICK (tam nghi ca nick khi Facebook gioi han); None = acc_dir (nhu cu).
+    identity_name: ten Page dang dung ("" = Ca nhan) -> Page chua vao nhom thi ghi them dong 'not_member'.
+    expect_identity: (id, ten) = run["expect"], run["name"] cua begin_identity -> kiem cookie i_user truoc MOI nhom
+    (plan 003 muc 3.10c); lech -> fb_login.IdentityChanged bay ra ngoai (nguoi goi ghi nhat ky, dung luot).
+    None = khong kiem (cach goi cu)."""
+    nick_dir = nick_dir or acc_dir
     counts = {POSTED: 0, PENDING: 0, NOT_MEMBER: 0, SKIP_PENDING: 0, SKIP_PAUSED: 0, BLOCKED: 0, FAILED: 0}
     cleanup_error_shots()
     state = upstt_store.load_group_state(acc_dir) if acc_dir else {"groups": {}, "pending": {}}
@@ -520,6 +530,9 @@ def post_to_all_groups(
             fb_login.note(BASE_DIR, f"   ⏸ {RESULT_LABELS[SKIP_PAUSED]} – {group_label(group_url)} – đến "
                                     f"{upstt_store._when(g['until'])}: {g.get('reason', '')}")
             continue
+        if expect_identity:
+            # Ngoai khoi try ben duoi (khoi do bat RuntimeError - IdentityChanged la RuntimeError).
+            fb_login.assert_identity(page, *expect_identity)
         reason = ""
         try:
             # Nguoi dung bam Reset (nhom nhieu bai cho duyet) -> lan nay van dang 1 lan.
@@ -562,6 +575,10 @@ def post_to_all_groups(
             if acc_dir:   # ~2 tieng sau tool xem bai nay duoc duyet / bi tu choi chua (tab Ket qua)
                 fb_login.record_sent(acc_dir, GROUP_SLUGS.get(group_url) or group_url, link=key, text=share_url)
         fault = group_fault(status, reason)
+        if identity_name and fault == "chua_vao":
+            # Dang bang Page ma Page chua vao nhom: bo nhom nay, KHONG dang bang Ca nhan thay (PM cau 2).
+            fb_login.note(BASE_DIR, fb_login.IDENTITY_NOTES["not_member"].format(name=identity_name,
+                                                                               group=group_label(group_url)))
         if acc_dir and (status in (POSTED, PENDING) or fault == "chua_vao"):
             # Dang duoc = nhom da xac minh; bao chua vao / phai tra loi cau hoi = chua xac minh
             real = f"https://www.facebook.com/groups/{GROUP_SLUGS[group_url]}/" if GROUP_SLUGS.get(group_url) \
@@ -582,8 +599,9 @@ def post_to_all_groups(
         if status == BLOCKED:
             # Facebook dang chan / gioi han -> dung ngay + nghi ca tai khoan (moi noi dung, ca tool theo doi).
             print("[STOP] Facebook dang chan dang bai -> DUNG cac nhom con lai de bao ve tai khoan.")
-            if acc_dir:
-                info = fb_login.pause_nick(acc_dir, f"Facebook giới hạn tần suất khi đăng vào nhóm "
+            if nick_dir:
+                # Dang la Page van nghi CA nick (cung 1 Chrome / thiet bi - PM cau 5).
+                info = fb_login.pause_nick(nick_dir, f"Facebook giới hạn tần suất khi đăng vào nhóm "
                                                     f"{group_label(group_url)}")
                 fb_login.note(BASE_DIR, f"⛔ Facebook đang chặn / giới hạn tài khoản này (lần {info['strikes']}) → "
                                         f"dừng các nhóm còn lại, TẠM NGHỈ đăng bài + bình luận {info['hours']} giờ, "
@@ -607,6 +625,58 @@ def get_arg(name):
     if name in args and args.index(name) + 1 < len(args):
         return args[args.index(name) + 1]
     return None
+
+
+SELF = fb_login.IDENTITY_SELF
+
+
+def _norm_identity(value):
+    return str(value).strip() if value is not None and str(value).strip() else SELF
+
+
+def item_identity(account, campaign=None, identity_arg=None):
+    """Danh tinh dung cho 1 luot / 1 lenh (plan 003 muc 3.4): --identity > post_as cua muc > Ca nhan.
+
+    -> (id, ten). Ca nhan: ten "". Page: post_as_name cua muc; lenh co --identity thi them identities cua tai
+    khoan. Page khong con / id la -> ten "" (nguoi goi ghi IDENTITY_NOTES['missing'], bo luot).
+    """
+    campaign = campaign or {}
+    ident = _norm_identity(identity_arg or campaign.get("post_as"))
+    if ident == SELF or not re.fullmatch(r"\d+", ident):
+        return ident, ""
+    name = campaign.get("post_as_name") or "" if _norm_identity(campaign.get("post_as")) == ident else ""
+    if not name and identity_arg:
+        # Page 'missing' (doc danh sach lan sau khong thay) -> coi nhu khong con (plan 003 muc 3.10d).
+        name = next((i.get("name") or "" for i in account.get("identities", [])
+                     if str(i.get("id")) == ident and not i.get("missing")), "")
+    return ident, name
+
+
+def find_item(account, campaign_id):
+    """Muc (dang bai, hoac theo doi trong config chung) cua tai khoan theo id; khong co -> None."""
+    if not campaign_id:
+        return None
+    found = next((c for c in account.get("campaigns", []) if c.get("id") == campaign_id), None)
+    if found is None:
+        try:
+            import tool_store
+            full = next((a for a in tool_store.load()["accounts"] if a["id"] == account["id"]), {})
+            found = next((c for c in full.get("campaigns", []) if c.get("id") == campaign_id), None)
+        except Exception:
+            found = None
+    return found
+
+
+def enter_identity(page, account, acc_dir, ident, name):
+    """Buoc 2-3 cua luot = fb_login.begin_identity (plan 003 muc 3.10). -> run dict, hoac None = bo luot (da ghi
+    nhat ky). Tai khoan Page kieu cu: run["legacy"], KHONG chuyen ve Ca nhan."""
+    return fb_login.begin_identity(page, acc_dir, ident, name, BASE_DIR, account.get("name", ""),
+                                   shot_dir=BASE_DIR / "anh_loi")
+
+
+def leave_identity(page, acc_dir):
+    """Buoc 5 (finally) = fb_login.end_identity: kieu cu khong bam gi, con lai ve Ca nhan. Khong bao gio raise."""
+    fb_login.end_identity(page, acc_dir, BASE_DIR)
 
 
 def open_account_context(playwright, account_id, headless, wait_minutes=0):
@@ -666,14 +736,22 @@ def run_campaign(account, campaign):
                 fb_login.note(BASE_DIR, f"⚠️ {account['name']}: Facebook đã đăng xuất tài khoản → tạm dừng, "
                                         "cần đăng nhập lại.")
                 raise
+            # Task 003: dung danh tinh "Dang bang" cua muc; du lieu nhom / ket qua theo danh tinh (id_dir),
+            # tam nghi / khoa / tien do theo nick (acc_dir).
+            ident, ident_name = item_identity(account, campaign)
+            run = enter_identity(page, account, acc_dir, ident, ident_name)
+            if not run:
+                return
+            ident = run["id"]
+            id_dir = fb_login.identity_dir(acc_dir, ident)
             groups = campaign["groups"]
             # Nhom tai khoan nay moi XIN vao (cho duyet / can tra loi cau hoi) -> chua la thanh vien, bo qua.
-            joins = upstt_store.join_state(account["id"])
+            joins = upstt_store.join_state(account["id"], identity=ident)
             waiting = [g for g in groups if joins.get(fb_login.group_slug(g) or g, {}).get("status")
                        in upstt_store.JOIN_WAITING]
             if waiting:
                 # Xem lai nhom dang xin: da duoc duyet -> xac minh ngay roi dang luon trong luot nay.
-                approved = recheck_waiting(page, acc_dir, waiting, campaign=campaign)
+                approved = recheck_waiting(page, id_dir, waiting, campaign=campaign)
                 waiting = [g for g in waiting if g not in approved]
                 groups = [g for g in groups if g not in waiting]
                 if approved:
@@ -684,12 +762,13 @@ def run_campaign(account, campaign):
                 if not groups:
                     fb_login.note(BASE_DIR, "   ⏸ Không còn nhóm nào tài khoản đã vào → lượt này không đăng.")
                     return
-            known = [fb_login.group_slug(g) for c in account["campaigns"] if c["enabled"] for g in c.get("groups", [])]
-            due = fb_login.groups_due(acc_dir, known=known)
+            known = [fb_login.group_slug(g) for c in account["campaigns"]
+                     if c["enabled"] and _norm_identity(c.get("post_as")) == ident for g in c.get("groups", [])]
+            due = fb_login.groups_due(id_dir, known=known)
             if due:
                 # Bai da gui >= 2 tieng: xem quan tri vien da duyet / tu choi chua (1 trang / nhom).
                 print(f"[KET QUA] Kiem tra {len(due)} nhom da dang truoc do.")
-                fb_login.check_results(page, acc_dir, due, note=lambda t: fb_login.note(BASE_DIR, t))
+                fb_login.check_results(page, id_dir, due, note=lambda t: fb_login.note(BASE_DIR, t))
             total = len(groups)
             if fb_login.recovering(acc_dir) and len(groups) > 1:
                 # Vua het nghi do Facebook gioi han -> ngay dau chi dang nua so nhom (doi nhom theo ngay).
@@ -703,7 +782,7 @@ def run_campaign(account, campaign):
             # chua dang nhat -> xoay vong het danh sach qua cac luot.
             cap = int(campaign.get("max_groups_per_run") or 0)
             if cap and len(groups) > cap:
-                sent = fb_login.load_results(acc_dir).get("sent", {})
+                sent = fb_login.load_results(id_dir).get("sent", {})
                 last = lambda g: max((e[0] for e in sent.get(fb_login.group_slug(g) or g, [])), default=0)
                 groups = sorted(groups, key=last)[:cap]
                 fb_login.note(BASE_DIR, f"   ⏳ Giới hạn an toàn: lượt này chỉ đăng {len(groups)}/"
@@ -713,24 +792,34 @@ def run_campaign(account, campaign):
                 has_media = False
                 fb_login.note(BASE_DIR, f"   ⚠️ Không thấy ảnh/video trong thư mục {campaign['media_folder']} → "
                                         "lượt này chỉ đăng chữ.")
-            post_to_all_groups(
-                page,
-                groups,
-                campaign["share_text"],
-                upstt_store.LINK_LOAD_WAIT * 1000,
-                upstt_store.POST_WAIT * 1000,
-                upstt_store.GROUP_SWITCH_WAIT * 1000,
-                acc_dir=acc_dir,
-                media_pick=(lambda: upstt_store.media_pick(campaign)) if has_media else None,
-            )
-            # Trinh duyet dang mo san -> xem tin nhan giup lich 'Kiem tra tin nhan' (nick ban dang bai thi lich do
-            # bo luot). Loi o day khong anh huong luot dang.
             try:
-                fb_login.check_inbox_page(page, acc_dir, account["name"], note=lambda t: fb_login.note(BASE_DIR, t),
-                                          piggyback=True)
+                post_to_all_groups(
+                    page,
+                    groups,
+                    campaign["share_text"],
+                    upstt_store.LINK_LOAD_WAIT * 1000,
+                    upstt_store.POST_WAIT * 1000,
+                    upstt_store.GROUP_SWITCH_WAIT * 1000,
+                    acc_dir=id_dir,
+                    media_pick=(lambda: upstt_store.media_pick(campaign)) if has_media else None,
+                    nick_dir=acc_dir,
+                    identity_name=run["name"] if ident != SELF or run["legacy"] else "",
+                    expect_identity=(run["expect"], run["name"]),
+                )
+            except fb_login.IdentityChanged as error:
+                fb_login.note(BASE_DIR, error.note_text)
+                return
+            # Trinh duyet dang mo san -> xem tin nhan giup lich 'Kiem tra tin nhan' (nick ban dang bai thi lich do
+            # bo luot). Loi o day khong anh huong luot dang. Kieu cu: doc o danh tinh dang mo nhu ban cu; con lai
+            # chi khi dang o Ca nhan (khong chuyen chi de xem tin - plan 003 muc 3.10a).
+            try:
+                if run["legacy"] or fb_login.current_identity(page) == SELF:
+                    fb_login.check_inbox_page(page, acc_dir, account["name"],
+                                              note=lambda t: fb_login.note(BASE_DIR, t), piggyback=True)
             except Exception as error:
                 print(f"[TIN NHAN] Loi xem tin nhan: {str(error).splitlines()[0][:100]}")
         finally:
+            leave_identity(page, acc_dir)   # khong bao gio raise
             watchdog.cancel()
             context.close()
 
@@ -749,25 +838,32 @@ def care_new_approved(account, show_progress=False):
     if not campaigns or fb_login.nick_pause(acc_dir):
         return 0
     # Moi muc 1 noi dung cham; nhom trung giua cac muc -> muc dau tien.
+    # Task 003: bai cua danh tinh nao thi cham bang danh tinh do (cham_bai.json / ket_qua.json theo identity_dir).
     picks, taken = [], set()
     for c in campaigns:
-        urls = [u for u in fb_login.care_candidates(acc_dir, c["groups"]) if u not in taken]
-        urls = urls[:AUTO_CARE_MAX - sum(len(u) for _t, u in picks)]
+        ident, ident_name = item_identity(account, c)
+        if ident != SELF and not ident_name:
+            continue   # Page khong con trong tai khoan -> khong cham (luot dang da bao 'missing')
+        id_dir = fb_login.identity_dir(acc_dir, ident)
+        urls = [u for u in fb_login.care_candidates(id_dir, c["groups"]) if u not in taken]
+        urls = urls[:AUTO_CARE_MAX - sum(len(u) for _t, u, _i in picks)]
         if urls:
             taken.update(urls)
-            picks.append((c["care_text"].strip(), urls))
+            picks.append((c["care_text"].strip(), urls, ident))
     if not picks:
         print(f"[CHAM] {account['name']}: khong co bai moi duoc duyet can cham.")
         return 0
-    total = sum(len(u) for _t, u in picks)
+    total = sum(len(u) for _t, u, _i in picks)
     fb_login.note(BASE_DIR, f"💬 Tự chăm bài – {account['name']}: {total} bài mới được duyệt.")
     if show_progress:   # bam 'Cap nhat' tren giao dien: thanh tien do hien dang cham
         done = fb_login.read_progress(acc_dir).get("text", "")
         fb_login.write_progress(acc_dir, "care", f"Đang tự chăm {total} bài mới được duyệt…", 0, total)
-    for text, urls in picks:
+    for text, urls, ident in picks:
+        # Ca nhan: lenh y nhu cu; Page: them --identity (fb_monitor_v4 tu chuyen danh tinh + ve Ca nhan).
+        extra = ["--identity", ident] if ident != SELF else []
         try:
             subprocess.run([sys.executable, str(BASE_DIR / "main.py"), "--comment-posts", "--account",
-                            account["id"], "--urls", "|".join(urls), "--text", text], cwd=BASE_DIR,
+                            account["id"], "--urls", "|".join(urls), "--text", text] + extra, cwd=BASE_DIR,
                            timeout=40 * 60)
         except subprocess.TimeoutExpired:
             fb_login.note(BASE_DIR, f"⏰ Tự chăm bài – {account['name']}: chạy quá 40 phút → dừng.")
@@ -803,6 +899,13 @@ def auto_care(data):
                                    if fb_login.group_slug(g)))
         if not slugs:
             continue
+        # Task 003: nhom cac muc theo danh tinh "Dang bang" (Ca nhan truoc, giu thu tu) -> {id: [ten, [slug]]}.
+        by_ident = {SELF: ["", []]}
+        for c in campaigns:
+            ident, ident_name = item_identity(account, c)
+            entry = by_ident.setdefault(ident, [ident_name, []])
+            entry[0] = entry[0] or ident_name
+            entry[1].extend(fb_login.group_slug(g) for g in c.get("groups", []) if fb_login.group_slug(g))
         # Nick dang dang bai / quet o luot khac -> bo qua, luot sau lam (khong chen ngang).
         if not fb_login.hold_nick(acc_dir, wait_minutes=0):
             fb_login.note(BASE_DIR, f"⏭ {account['name']}: đang bận (tool khác dùng) → để lượt cập nhật sau.")
@@ -810,13 +913,23 @@ def auto_care(data):
         try:
             with sync_playwright() as playwright:
                 context = open_account_context(playwright, account["id"], headless=True)
+                page = None
                 try:
                     page = fb_login.get_page(context)
                     fb_login.verify_and_record(page, acc_dir)
                     fb_login.note(BASE_DIR, f"🔄 Tự cập nhật – {account['name']}: {len(slugs)} nhóm "
                                             f"({len(campaigns)} mục đăng bài / theo dõi).")
-                    fb_login.check_results(page, acc_dir, slugs, note=lambda t: fb_login.note(BASE_DIR, t))
+                    for ident, (ident_name, ident_slugs) in by_ident.items():
+                        ident_slugs = list(dict.fromkeys(ident_slugs))
+                        if not ident_slugs:
+                            continue
+                        # Loi chuyen danh tinh -> bo danh tinh do (khong doc ket qua nham), lam tiep danh tinh khac.
+                        if not enter_identity(page, account, acc_dir, ident, ident_name):
+                            continue
+                        fb_login.check_results(page, fb_login.identity_dir(acc_dir, ident), ident_slugs,
+                                               note=lambda t: fb_login.note(BASE_DIR, t))
                 finally:
+                    leave_identity(page, acc_dir)
                     context.close()
         except (fb_login.NotLoggedIn, fb_login.ProfileBusy) as error:
             fb_login.note(BASE_DIR, f"⏭ {account['name']}: {str(error).splitlines()[0][:100]} → bỏ qua lượt này.")
@@ -859,9 +972,16 @@ def check_inbox(data, account_id=None):
                 try:
                     page = fb_login.get_page(context)
                     fb_login.verify_and_record(page, acc_dir)
-                    # Nut bam tay -> doc du 3 muc; lich -> luot nhanh (Hop thu), du 3 muc moi 2 tieng / khi co tin.
-                    fb_login.check_inbox_page(page, acc_dir, account["name"],
-                                              note=lambda t: fb_login.note(BASE_DIR, t), force_full=bool(account_id))
+                    # Task 003 (muc 3.10a): tai khoan Page kieu cu -> doc o danh tinh dang mo nhu ban cu, KHONG chuyen.
+                    # Con lai: tin nhan cua Ca nhan -> luot truoc bi ngat de Chrome o Page thi ve Ca nhan truoc.
+                    if fb_login.legacy_page_id(page, acc_dir) or \
+                            fb_login.back_to_self(page, fb_login.self_name_of(acc_dir)):
+                        # Nut bam tay -> doc du 3 muc; lich -> luot nhanh (Hop thu), du 3 muc moi 2 tieng / khi co tin.
+                        fb_login.check_inbox_page(page, acc_dir, account["name"],
+                                                  note=lambda t: fb_login.note(BASE_DIR, t),
+                                                  force_full=bool(account_id))
+                    else:
+                        print(f"[TIN NHAN] {account['name']}: Chrome dang o Page, chua ve Ca nhan duoc -> bo qua.")
                 finally:
                     context.close()
         except (fb_login.NotLoggedIn, fb_login.ProfileBusy) as error:
@@ -872,6 +992,66 @@ def check_inbox(data, account_id=None):
         finally:
             fb_login.release_nick(acc_dir)
         print(f"[TIN NHAN] {account['name']}: {len(fb_login.unseen_inbox(acc_dir))} cuoc tro chuyen co tin chua xem.")
+
+
+def read_identities_cli(account):
+    """Lenh --read-identities (plan 003 muc 3.4): hold_nick -> Chrome ngam -> verify -> fb_login.read_identities
+    -> save_identities_file. Tien do ghi kiem_tra_tien_do.json (acc_dir). Loi -> KHONG ghi danh_tinh.json, raise
+    (NotLoggedIn -> 3, ProfileBusy -> 4, con lai -> 1). Facebook gioi han -> pause_nick."""
+    acc_dir = upstt_store.account_dir(account["id"])
+    fb_login.use_task_log(BASE_DIR, account["id"])
+    fb_login.write_progress(acc_dir, "start", "Đang chuẩn bị đọc danh sách Page…", 0, 1)
+    try:
+        if not fb_login.hold_nick(acc_dir, wait_minutes=0):
+            fb_login.write_progress(acc_dir, "wait", "Đang chờ tài khoản rảnh: tool khác (đăng bài / theo dõi) đang "
+                                                     "dùng tài khoản này. Tool tự đợi tối đa 25 phút.", 0, 1)
+            if not fb_login.hold_nick(acc_dir, wait_minutes=25):
+                raise fb_login.ProfileBusy("Tai khoan ban qua 25 phut.")
+        with sync_playwright() as playwright:
+            fb_login.write_progress(acc_dir, "login", "Đang mở Facebook (chạy ngầm) và kiểm tra đăng nhập…", 0, 1)
+            context = open_account_context(playwright, account["id"], headless=True, wait_minutes=25)
+            try:
+                page = fb_login.get_page(context)
+                fb_login.verify_and_record(page, acc_dir)
+                legacy = fb_login.legacy_page_id(page, acc_dir)
+                if legacy:
+                    # Doc danh sach se keo Chrome ve Ca nhan -> tai khoan het la kieu cu -> dang bang Ca nhan (3.10a).
+                    raise RuntimeError("legacy_read:" + legacy)
+                fb_login.write_progress(acc_dir, "group", f"Đang đọc danh sách Page (mỗi Page khoảng "
+                                                          f"{fb_login.IDENTITY_SWITCH_WAIT} giây)…", 0, 1)
+                found = fb_login.read_identities(page)   # tu ve Ca nhan trong finally
+            finally:
+                context.close()
+        fb_login.save_identities_file(acc_dir, found)
+        pages = [i for i in found if i.get("kind") == "page"]
+        text = fb_login.IDENTITY_NOTES["read"].format(account=account["name"], pages=len(pages))
+        fb_login.note(BASE_DIR, text)
+        print(f"[DANH TINH] {account['name']}: Ca nhan + {len(pages)} Page.")
+        fb_login.write_progress(acc_dir, "done", text + (" " + ", ".join(p["name"] for p in pages) if pages else ""),
+                                1, 1, done=True)
+    except fb_login.ProfileBusy:
+        fb_login.write_progress(acc_dir, "done", "Tài khoản bận quá 25 phút (tool khác đang dùng) → thử lại sau.",
+                                0, 1, done=True, ok=False)
+        raise
+    except fb_login.NotLoggedIn:
+        fb_login.write_progress(acc_dir, "done", "Facebook đã đăng xuất tài khoản này → vào trang tài khoản bấm "
+                                                 "Đăng nhập.", 0, 1, done=True, ok=False)
+        raise
+    except Exception as error:
+        if str(error).startswith("legacy_read:"):
+            pid = str(error).split(":", 1)[1]
+            fb_login.write_progress(acc_dir, "done", fb_login.IDENTITY_NOTES["legacy_read"].format(
+                name=fb_login._legacy_page_name(acc_dir, pid)), 0, 1, done=True, ok=False)
+            raise
+        if "rate_limited" in str(error):
+            info = fb_login.pause_nick(acc_dir, "Facebook giới hạn khi đọc danh sách Page")
+            fb_login.note(BASE_DIR, f"⛔ Facebook đang giới hạn tài khoản này → TẠM NGHỈ đến "
+                                    f"{fb_login.pause_text(info)}.")
+        fb_login.write_progress(acc_dir, "done", f"Đọc danh sách Page lỗi: {str(error).splitlines()[0][:120]}",
+                                0, 1, done=True, ok=False)
+        raise
+    finally:
+        fb_login.release_nick(acc_dir)
 
 
 def campaigns_due_now(data, window_minutes=10):
@@ -998,6 +1178,13 @@ def main():
         urls = [u.strip() for u in (get_arg("--urls") or "").split("|") if u.strip()]
         per_day = int(get_arg("--per-day") or (fb_login.JOIN_PER_DAY if joining else fb_login.LEAVE_PER_DAY))
         verb = "xin vào" if joining else "rời"
+        # Task 003 (muc 3.10e, PM cau 7 doi): xin vao / roi bang danh tinh cua muc / --identity (Page duoc nhu Ca nhan).
+        ident, ident_name = item_identity(account, find_item(account, get_arg("--campaign")), get_arg("--identity"))
+        if ident != SELF and not ident_name:
+            fb_login.note(BASE_DIR, fb_login.IDENTITY_NOTES["missing"].format(name=ident, account=account["name"]))
+            fb_login.write_progress(acc_dir, "done", f"Danh tính \"{ident}\" không còn trong tài khoản → không {verb} "
+                                                     "nhóm.", 0, 1, done=True, ok=False)
+            return
         fb_login.write_progress(acc_dir, "start", f"Đang chuẩn bị {verb} nhóm…", 0, len(urls) or 1)
         pause = fb_login.nick_pause(acc_dir)
         if pause:
@@ -1010,17 +1197,28 @@ def main():
                   "no_button": "không thấy nút trên Facebook",
                   "unknown": "đã bấm, chưa rõ kết quả", "left": "đã rời", "not_member": "không ở trong nhóm",
                   "admin": "bạn là quản trị viên – tool không tự rời", "skip": "đã xử lý trước đó",
-                  "later": "để hôm sau (đủ giới hạn ngày)", "limited": "Facebook chặn"}
-        count, done_today = {}, 0
+                  "later": "để hôm sau (đủ giới hạn ngày)", "limited": "Facebook chặn",
+                  "join_as_missing": "không thấy danh tính trong hộp \"Tham gia với tư cách\" – không xin",
+                  "changed": "danh tính bị đổi giữa chừng – dừng"}
+        count, done_today, page = {}, 0, None
         with sync_playwright() as playwright:
             try:
                 context = open_account_context(playwright, account["id"], headless=True, wait_minutes=25)
                 page = fb_login.get_page(context)
                 try:
                     fb_login.verify_and_record(page, acc_dir)
-                    state = upstt_store.join_state(account["id"])
-                    fb_login.note(BASE_DIR, f"{'🙋' if joining else '🚪'} {account['name']}: {verb} {len(urls)} nhóm "
-                                            f"(tối đa {per_day}/ngày)")
+                    run = enter_identity(page, account, acc_dir, ident, ident_name)
+                    if not run:
+                        fb_login.write_progress(acc_dir, "done", f"Không chuyển được sang \"{ident_name or 'Cá nhân'}\" → "
+                                                f"không {verb} nhóm.", 0, 1, done=True, ok=False)
+                        return
+                    id_dir = fb_login.identity_dir(acc_dir, run["id"])
+                    as_name = None if run["expect"] == SELF else run["name"]
+                    state = upstt_store.join_state(account["id"], identity=run["id"])
+                    who = f" (bằng {run['name']})" if run["expect"] != SELF else ""
+                    fb_login.note(BASE_DIR, f"{'🙋' if joining else '🚪'} {account['name']}{who}: {verb} {len(urls)} nhóm "
+                                            f"(tối đa {per_day}/ngày, tính chung cả nick)")
+                    first_click = True
                     for i, url in enumerate(urls):
                         slug = fb_login.group_slug(url) or url
                         status_now = state.get(slug, {}).get("status")
@@ -1028,10 +1226,22 @@ def main():
                         if joining and status_now == "joined":
                             count["skip"] = count.get("skip", 0) + 1
                             continue
-                        used = fb_login.joins_today(acc_dir) if joining else done_today
-                        if used >= per_day:
+                        # Gioi han xin vao tinh chung CA NICK (Ca nhan + moi Page - muc 3.10e).
+                        usage = fb_login.nick_join_usage(acc_dir) if joining else {"today": done_today, "last": 0}
+                        if usage["today"] >= per_day:
                             fb_login.note(BASE_DIR, f"   ⏸ Đủ {per_day} nhóm hôm nay → dừng, hôm sau làm tiếp phần còn lại.")
                             count["later"] = len(urls) - i
+                            break
+                        if joining and first_click:
+                            gap = fb_login.JOIN_WAIT_SECONDS - (time.time() - usage["last"])
+                            if 0 < gap <= fb_login.JOIN_WAIT_SECONDS:
+                                print(f"[XIN NHOM] Nick vua xin nhom khac -> doi {int(gap)}s.")
+                                page.wait_for_timeout(int(gap * 1000))
+                        try:
+                            fb_login.assert_identity(page, run["expect"], run["name"])
+                        except fb_login.IdentityChanged as error:
+                            fb_login.note(BASE_DIR, error.note_text)
+                            count["changed"] = 1
                             break
                         fb_login.write_progress(acc_dir, "group", f"Đang {verb} nhóm {slug} ({i + 1}/{len(urls)})",
                                                 i, len(urls))
@@ -1039,7 +1249,8 @@ def main():
                         answer = get_arg("--answer") or answer
                         wave = wave if get_arg("--wave") is None else get_arg("--wave") == "1"
                         if joining:
-                            status, clicked = fb_login.join_group(page, url, answer=answer)
+                            status, clicked = fb_login.join_group(page, url, answer=answer, as_name=as_name)
+                            first_click = first_click and not clicked
                         else:
                             status, clicked = fb_login.leave_group(page, url)
                         if status == "limited":
@@ -1048,10 +1259,16 @@ def main():
                                                     f"{fb_login.pause_text(info)}.")
                             count["limited"] = 1
                             break
-                        if joining:
-                            fb_login.set_join_status(acc_dir, url, status, requested=clicked)
+                        if joining and status != "join_as_missing":
+                            fb_login.set_join_status(id_dir, url, status, requested=clicked)
+                        elif joining:
+                            # Da bam 'Tham gia' (tinh vao gioi han ca nick) ma khong chon duoc danh tinh -> ghi lan bam.
+                            st_join = fb_login.load_join_state(id_dir)
+                            st_join.setdefault(slug, {"status": status_now or "", "url": url})["requested"] = time.time()
+                            st_join[slug]["time"] = time.time()
+                            fb_login.save_join_state(id_dir, st_join)
                         elif status in ("left", "not_member"):
-                            fb_login.forget_joined(acc_dir, url)
+                            fb_login.forget_joined(id_dir, url)
                         if clicked:
                             done_today += 1
                         count[status] = count.get(status, 0) + 1
@@ -1059,11 +1276,12 @@ def main():
                         fb_login.note(BASE_DIR, f"   {slug}: {labels.get(status, status)}" + (f" ({extra})" if extra else ""))
                         if joining and status == "joined":   # vao duoc ngay -> xac minh luon (dang duoc chua)
                             page.wait_for_timeout(3_000)
-                            verify_one(page, acc_dir, url, answer, wave)
+                            verify_one(page, id_dir, url, answer, wave)
                         if clicked and i < len(urls) - 1:
                             page.wait_for_timeout((fb_login.JOIN_WAIT_SECONDS if joining
                                                    else fb_login.LEAVE_WAIT_SECONDS) * 1000)
                 finally:
+                    leave_identity(page, acc_dir)
                     context.close()
             except Exception as error:
                 fb_login.write_progress(acc_dir, "done", f"{verb.capitalize()} nhóm lỗi: "
@@ -1073,7 +1291,7 @@ def main():
                 fb_login.release_nick(acc_dir)
         summary = ", ".join(f"{n} {labels.get(k, k)}" for k, n in count.items())
         fb_login.write_progress(acc_dir, "done", f"Xong: {summary or 'không có nhóm nào'}.", len(urls), len(urls),
-                                done=True, ok="limited" not in count)
+                                done=True, ok="limited" not in count and "changed" not in count)
         print(f"[{'XIN' if joining else 'ROI'} NHOM] {account['name']}: {summary}")
         return
 
@@ -1085,6 +1303,14 @@ def main():
             raise ValueError("Thieu hoac sai --account.")
         acc_dir = upstt_store.account_dir(account["id"])
         fb_login.use_task_log(BASE_DIR, account["id"])
+        # Task 003: --identity > post_as cua --campaign > Ca nhan; nhom da vao / xac minh ghi theo danh tinh.
+        ident, ident_name = item_identity(account, find_item(account, get_arg("--campaign")), get_arg("--identity"))
+        if ident != SELF and not ident_name:
+            fb_login.note(BASE_DIR, fb_login.IDENTITY_NOTES["missing"].format(name=ident, account=account["name"]))
+            fb_login.write_progress(acc_dir, "done", f"Danh tính \"{ident}\" không còn trong tài khoản → không đọc nhóm.",
+                                    0, 1, done=True, ok=False)
+            return
+        id_dir = fb_login.identity_dir(acc_dir, ident)
         fb_login.write_progress(acc_dir, "start", "Đang chuẩn bị đọc nhóm đã tham gia…", 0, 1)
         with sync_playwright() as playwright:
             try:
@@ -1092,17 +1318,22 @@ def main():
                 page = fb_login.get_page(context)
                 try:
                     fb_login.verify_and_record(page, acc_dir)
+                    if not enter_identity(page, account, acc_dir, ident, ident_name):
+                        fb_login.write_progress(acc_dir, "done", f"Không chuyển được sang \"{ident_name or ident}\" → "
+                                                "không đọc nhóm.", 0, 1, done=True, ok=False)
+                        return
                     fb_login.write_progress(acc_dir, "group", "Đang đọc danh sách nhóm đã tham gia…", 0, 1)
                     groups, complete = fb_login.read_joined_groups(page, with_complete=True)
-                    cache = fb_login.save_joined_groups(acc_dir, groups)
-                    approved, gone = fb_login.mark_joined(acc_dir, cache["groups"], complete=complete)
+                    cache = fb_login.save_joined_groups(id_dir, groups)
+                    approved, gone = fb_login.mark_joined(id_dir, cache["groups"], complete=complete)
                     text = (f"Đang ở {len(cache['groups'])} nhóm · {approved} nhóm mới được duyệt"
                             + (f" · {gone} nhóm đã rời / bị mời ra" if gone else ""))
                     # Da vao la phai xac minh: moi nhom tai khoan nay se dang (moi muc cua no + --urls) da vao ma
                     # chua xac minh (vd vua duoc duyet) -> xac minh ngay.
-                    state = fb_login.load_join_state(acc_dir)
+                    state = fb_login.load_join_state(id_dir)
                     urls = [u.strip() for u in (get_arg("--urls") or "").split("|") if u.strip()]
-                    urls += [g for c in account.get("campaigns", []) for g in c.get("groups", [])]
+                    urls += [g for c in account.get("campaigns", []) if _norm_identity(c.get("post_as")) == ident
+                             for g in c.get("groups", [])]
                     todo, seen = [], set()
                     for u in urls:
                         slug = fb_login.group_slug(u) or u
@@ -1114,7 +1345,7 @@ def main():
                     for i, url in enumerate(todo):
                         fb_login.write_progress(acc_dir, "group", f"Đang xác minh nhóm {i + 1}/{len(todo)}…", i,
                                                 len(todo))
-                        ready += verify_one(page, acc_dir, url, *join_options(account, url)) == "ready"
+                        ready += verify_one(page, id_dir, url, *join_options(account, url)) == "ready"
                         page.wait_for_timeout(VERIFY_WAIT_SECONDS * 1000)
                     if todo:
                         text += f" · xác minh {ready}/{len(todo)} nhóm sẵn sàng đăng"
@@ -1122,6 +1353,7 @@ def main():
                     fb_login.note(BASE_DIR, f"🔄 {account['name']}: {text}")
                     fb_login.write_progress(acc_dir, "done", text + ".", 1, 1, done=True)
                 finally:
+                    leave_identity(page, acc_dir)
                     context.close()
             except Exception as error:
                 fb_login.write_progress(acc_dir, "done", f"Đọc nhóm lỗi: {str(error).splitlines()[0][:120]}", 0, 1,
@@ -1152,21 +1384,49 @@ def main():
             slugs = [s for s in (get_arg("--groups") or "").split(",") if s]
             # Ghi nhat ky vao noi dung dang xem (tab Chi tiet hien duoc).
             fb_login.use_task_log(BASE_DIR, get_arg("--campaign") or "ket_qua")
-            fb_login.check_results_cli(
+            # Task 003: --identity > post_as cua --campaign > Ca nhan; ket qua ghi theo danh tinh.
+            ident, ident_name = item_identity(account, find_item(account, get_arg("--campaign")),
+                                              get_arg("--identity"))
+            if ident != SELF and not ident_name:
+                fb_login.note(BASE_DIR, fb_login.IDENTITY_NOTES["missing"].format(name=ident, account=account["name"]))
+                fb_login.write_progress(acc_dir, "done", f"Danh tính \"{ident}\" không còn trong tài khoản → không "
+                                        "kiểm tra.", 0, 1, done=True, ok=False)
+                return
+            switched = fb_login.check_results_cli(
                 acc_dir, slugs,
                 lambda: open_account_context(playwright, account["id"], headless=True, wait_minutes=25),
-                note=lambda t: fb_login.note(BASE_DIR, t))
+                note=lambda t: fb_login.note(BASE_DIR, t),
+                identity={"id": ident, "name": ident_name, "account_name": account["name"]})
         # Cap nhat bang tay xong -> tu cham bai moi duoc duyet (muc co noi dung 'Cham bai').
         fb_login.release_nick(acc_dir)
+        if switched is False:   # khong chuyen duoc danh tinh -> khong cham bai bang danh tinh do
+            return
         campaign = get_arg("--campaign")
         if campaign:
             account = dict(account, campaigns=[c for c in account["campaigns"] if c["id"] == campaign])
+        elif get_arg("--identity"):
+            account = dict(account, campaigns=[c for c in account["campaigns"]
+                                               if _norm_identity(c.get("post_as")) == ident])
         care_new_approved(account, show_progress=True)
+        return
+
+    # Giao dien: nut 'Doc danh sach Page' (task 003) -> accounts/<id>/danh_tinh.json (giao dien doc + Luu config).
+    # Ma thoat: 0 xong · 3 chua dang nhap · 4 ban · 1 loi khac (khong ghi file).
+    if "--read-identities" in args:
+        account = upstt_store.find_account(data, get_arg("--account") or "")
+        if not account:
+            raise ValueError("Thieu hoac sai --account.")
+        read_identities_cli(account)
         return
 
     # --login / --check / --logout: theo tung tai khoan (--account a1).
     if "--login" in args or "--check" in args or "--logout" in args:
         account = upstt_store.find_account(data, get_arg("--account") or "")
+        merged_id = get_arg("--account") or ""
+        if not account and "--logout" in args and re.fullmatch(r"[A-Za-z0-9_-]+", merged_id) \
+                and (upstt_store.ACCOUNTS_DIR / merged_id / "da_gop.json").exists():
+            # Task 003: tai khoan da gop (khong con trong config) -> van dang xuat + xoa Chrome cua no.
+            account = {"id": merged_id, "name": merged_id, "campaigns": []}
         if not account:
             raise ValueError("Thieu hoac sai --account.")
         acc_dir = upstt_store.account_dir(account["id"])

@@ -226,18 +226,29 @@ JOIN_FILE = "xin_vao_nhom.json"   # trang thai xin vao nhom cua tai khoan: {slug
 JOIN_WAITING = ("pending", "questions")   # chua la thanh vien -> luot dang bo qua nhom nay
 
 
+def _identity_folder(account_id, identity="self"):
+    """Thu muc du lieu danh tinh cua tai khoan (task 003, fb_login.identity_dir). Id la -> thu muc rong o
+    accounts/<id>/danh_tinh/_khong_hop_le (doc ra rong, khong lan du lieu Ca nhan)."""
+    import fb_login
+    try:
+        return fb_login.identity_dir(ACCOUNTS_DIR / account_id, identity)
+    except ValueError:
+        return ACCOUNTS_DIR / account_id / fb_login.IDENTITY_DIR_NAME / "_khong_hop_le"
+
+
 def join_state(account_id, identity="self"):
     """{slug: {status, ...}}: trang thai xin vao nhom + cac nhom da doc duoc la 'da tham gia' (nhom_da_vao.json).
 
     identity (task 003): "self" (mac dinh, file o accounts/<id>/) | id Page -> doc o
-    fb_login.identity_dir(accounts/<id>, identity). (Khung: chua dung, luon doc cua Ca nhan.)
+    fb_login.identity_dir(accounts/<id>, identity).
     """
+    folder = _identity_folder(account_id, identity)
     try:
-        st = json.loads((ACCOUNTS_DIR / account_id / JOIN_FILE).read_text(encoding="utf-8"))
+        st = json.loads((folder / JOIN_FILE).read_text(encoding="utf-8"))
     except Exception:
         st = {}
     try:
-        joined = json.loads((ACCOUNTS_DIR / account_id / "nhom_da_vao.json").read_text(encoding="utf-8"))["groups"]
+        joined = json.loads((folder / "nhom_da_vao.json").read_text(encoding="utf-8"))["groups"]
     except Exception:
         joined = []
     for g in joined:
@@ -382,7 +393,8 @@ def pause_notes(account, campaign):
     elif fb_login.recovering(acc_dir):
         notes.append({"kind": "recovering", "key": "", "reset": True,
                       "text": f"Tài khoản '{account['name']}' vừa hết nghỉ → hôm nay chỉ đăng nửa số nhóm cho an toàn"})
-    st = load_group_state(acc_dir)
+    # Tam nghi CA nick o acc_dir (tren); nhom tam nghi / cho duyet theo danh tinh dang bai cua muc (task 003).
+    st = load_group_state(_identity_folder(account["id"], campaign.get("post_as") or "self"))
     mine = {group_key(g) for g in campaign_groups(account["id"], campaign)}
     now = time.time()
     for key, g in st["groups"].items():
@@ -404,21 +416,22 @@ def reset_pause(account, kind, key, identity="self"):
     """Nut Reset: bo nghi thu cong.
 
     identity (task 003): nhom tam nghi / cho duyet nam o fb_login.identity_dir(acc_dir, identity); tam nghi CA nick
-    ('account' / 'recovering') van o acc_dir. (Khung: chua dung.)
+    ('account' / 'recovering') van o acc_dir.
     """
     import fb_login
     acc_dir = ACCOUNTS_DIR / account["id"]
     if kind in ("account", "recovering"):
         fb_login.clear_nick_pause(acc_dir)
         return
-    st = load_group_state(acc_dir)
+    folder = _identity_folder(account["id"], identity)
+    st = load_group_state(folder)
     if kind == "pending":
         # Lan dang toi van dang vao nhom nay 1 lan, bo qua kiem tra so bai cho duyet.
         import time
         st["pending"].pop(key, None)
         st.setdefault("force", {})[key] = time.time()
     st["groups"].pop(key, None)
-    save_group_state(acc_dir, st)
+    save_group_state(folder, st)
 
 
 MAX_POSTS_PER_GROUP_DAY = 1   # quan tri vien thay 1 nhom nhan > 1 bai/ngay cung noi dung -> de chan

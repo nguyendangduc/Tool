@@ -1287,6 +1287,39 @@ def close_login_window(profile_dir):
 
 
 # ------------------------------------------------------------------ ung dung chung
+class _ChainProc:
+    """Chay noi tiep nhieu lenh (task 003: moi danh tinh 1 lan '--check-results'), gia lap Popen.poll().
+    Lenh truoc loi (ma != 0) -> dung, tra ma do. stderr ghi chung 1 file (lenh dau ghi de, lenh sau ghi them)."""
+
+    def __init__(self, cmds, cwd, err_path):
+        self.cmds, self.cwd, self.err_path = list(cmds), cwd, err_path
+        self.returncode = None
+        self.first = True
+        self.proc = self._start()
+
+    def _start(self):
+        cmd = self.cmds.pop(0)
+        err_file = open(self.err_path, "w" if self.first else "a", encoding="utf-8")
+        self.first = False
+        try:
+            return subprocess.Popen(cmd, cwd=self.cwd, creationflags=NO_WINDOW,
+                                    stdout=subprocess.DEVNULL, stderr=err_file)
+        finally:
+            err_file.close()
+
+    def poll(self):
+        if self.returncode is not None:
+            return self.returncode
+        code = self.proc.poll()
+        if code is None:
+            return None
+        if code == 0 and self.cmds:
+            self.proc = self._start()
+            return None
+        self.returncode = code
+        return code
+
+
 class TreeConfigApp:
     """Ung dung cau hinh dang cay. Lop con khai bao:
 
@@ -1839,8 +1872,9 @@ class TreeConfigApp:
         today = datetime.now().strftime("%Y-%m-%d")
         posts = leads = 0
         for a in self.data["accounts"]:
-            sent = fb_login.load_results(self.account_dir(a)).get("sent", {})
-            posts += sum(1 for entries in sent.values() for e in entries if e[1] == "post" and e[0] >= start)
+            for folder in self.identity_dirs(a):   # task 003: cong moi danh tinh cua tai khoan
+                sent = fb_login.load_results(folder).get("sent", {})
+                posts += sum(1 for entries in sent.values() for e in entries if e[1] == "post" and e[0] >= start)
             for c in a["campaigns"]:
                 if c.get("kind") != "monitor":
                     continue
@@ -1856,20 +1890,21 @@ class TreeConfigApp:
         """(bai da dang 7 ngay, bai duoc duyet 7 ngay, khach tim duoc hom nay) cua 1 tai khoan."""
         import fb_login
         from datetime import datetime
-        st = fb_login.load_results(self.account_dir(account))
         since = time.time() - 7 * 86400
         posts = approved = 0
-        for slug, entries in st.get("sent", {}).items():
-            mine = [e for e in entries if e[1] == "post" and e[0] >= since]
-            if not mine:
-                continue
-            posts += len(mine)
-            group = st.get("groups", {}).get(slug)
-            if group:
-                statuses = fb_login.item_statuses(group, [{"time": e[0], "kind": e[1],
-                                                           "post_id": e[2] if len(e) > 2 else "",
-                                                           "snippet": e[3] if len(e) > 3 else ""} for e in mine])
-                approved += statuses.count("approved")
+        for folder in self.identity_dirs(account):   # task 003: cong moi danh tinh cua tai khoan
+            st = fb_login.load_results(folder)
+            for slug, entries in st.get("sent", {}).items():
+                mine = [e for e in entries if e[1] == "post" and e[0] >= since]
+                if not mine:
+                    continue
+                posts += len(mine)
+                group = st.get("groups", {}).get(slug)
+                if group:
+                    statuses = fb_login.item_statuses(group, [{"time": e[0], "kind": e[1],
+                                                               "post_id": e[2] if len(e) > 2 else "",
+                                                               "snippet": e[3] if len(e) > 3 else ""} for e in mine])
+                    approved += statuses.count("approved")
         today, leads = datetime.now().strftime("%Y-%m-%d"), 0
         for c in account["campaigns"]:
             if c.get("kind") != "monitor":
@@ -1901,8 +1936,11 @@ class TreeConfigApp:
                             f"{pause.get('reason', '')} · hết giờ nghỉ tool tự chạy lại", "Xem", go))
             try:
                 import upstt_store
-                st = upstt_store.join_state(a["id"])
-                waiting = sum(1 for g in st.values() if g.get("status") in upstt_store.JOIN_WAITING)
+                ids = self.store.account_identity_ids(a) if hasattr(self.store, "account_identity_ids") else ["self"]
+                waiting = 0
+                for ident in ids:   # task 003: cong moi danh tinh
+                    st = upstt_store.join_state(a["id"]) if ident == "self" else upstt_store.join_state(a["id"], identity=ident)
+                    waiting += sum(1 for g in st.values() if g.get("status") in upstt_store.JOIN_WAITING)
             except Exception:
                 waiting = 0
             if waiting:
@@ -2671,11 +2709,15 @@ class TreeConfigApp:
         if not usable:
             ttk.Label(login, text=f"→ Các {self.ITEM_NOUN} của tài khoản này đang TẠM DỪNG cho đến khi đăng nhập.\n"
                                   "① Bấm Đăng nhập  ② Chrome mở ra → đăng nhập Facebook (điện thoại hỏi thì chọn "
-                                  "'Đúng, là tôi')  ③ Thấy trang chủ thì bấm '✔ Đăng nhập xong'. Dùng Page: chọn Page "
-                                  "trước khi bấm xong.", style="Warn.TLabel", wraplength=760,
+                                  "'Đúng, là tôi')  ③ Thấy trang chủ thì bấm '✔ Đăng nhập xong'. Đăng nhập bằng CÁ "
+                                  "NHÂN – Page của nick chọn ở 'Đăng bằng' trong kịch bản (không cần tài khoản riêng "
+                                  "cho Page).", style="Warn.TLabel", wraplength=760,
                       justify="left").pack(anchor="w", pady=(4, 0))
         if waiting:
             self.show_login_waiting()
+        same = getattr(self, "same_nick_banner", None)   # task 003: canh bao chung 1 nick + nut Gop
+        if same:
+            same(self.right, account)
 
         # ---- 4 tab
         mine = [s for s in self.data["scenarios"] if account["id"] in s["accounts"]]
@@ -2688,8 +2730,14 @@ class TreeConfigApp:
             entries.append((f"💬 Tin nhắn ({unseen})", lambda p: self.inbox_section(p, account) if usable else
                             ttk.Label(p, text="Đăng nhập tài khoản trước để đọc tin nhắn.", style="Hint.TLabel").pack(
                                 anchor="w", pady=10)))
+        if hasattr(self, "identities_tab"):
+            n_id = len(self.store.account_identities(account))
+            entries.append((f"🎭 Cá nhân & Page ({n_id})", lambda p: self.identities_tab(p, account)))
         entries.append((f"📋 Kịch bản ({len(mine)})", lambda p: self.account_scenarios(p, account, mine)))
-        entries.append((f"👥 Nhóm đã vào ({len(joined['groups'])})", lambda p: self.joined_groups_tab(p, account)))
+        # Task 003 (3.10f): so nay la cua Ca nhan - nick co Page thi ghi ro, khong de lam so ca nick.
+        has_pages = hasattr(self.store, "account_identities") and len(self.store.account_identities(account)) > 1
+        entries.append((f"👥 Nhóm đã vào{' – Cá nhân' if has_pages else ''} ({len(joined['groups'])})",
+                        lambda p: self.joined_groups_tab(p, account)))
         entries.append(("⚙ Thiết lập", lambda p: self.account_settings_tab(p, account)))
         self.lazy_tabs(tabs, entries, "account")
 
@@ -2716,10 +2764,15 @@ class TreeConfigApp:
         from datetime import datetime
         acc_dir = self.account_dir(account)
         data = fb_login.load_joined_groups(acc_dir)
+        has_pages = hasattr(self.store, "account_identities") and len(self.store.account_identities(account)) > 1
+        who = "Cá nhân: " if has_pages else ""
         bar = ttk.Frame(parent)
         bar.pack(fill="x", pady=(0, 6))
-        ttk.Label(bar, text=(f"{len(data['groups'])} nhóm · đọc lúc {datetime.fromtimestamp(data['time']):%H:%M %d/%m}"
+        ttk.Label(bar, text=(f"{who}{len(data['groups'])} nhóm · đọc lúc {datetime.fromtimestamp(data['time']):%H:%M %d/%m}"
                              if data["time"] else "Chưa đọc danh sách nhóm lần nào."), style="Hint.TLabel").pack(side="left")
+        if has_pages:
+            ttk.Label(parent, text="Đây là nhóm của Cá nhân. Nhóm của từng Page: xem ở kịch bản đăng bằng Page đó "
+                                   "(bảng nhóm, cột trạng thái).", style="Hint.TLabel", wraplength=700).pack(anchor="w")
         runner = next((k for _key, k in self.all_kinds() if hasattr(k, "run_accounts")), None)
         if runner and self.account_usable(account):
             ttk.Button(bar, text="🔄 Đọc lại từ Facebook", command=lambda: runner.run_accounts(
@@ -3054,9 +3107,14 @@ class TreeConfigApp:
             licensed = self.store.licensed_account_ids(self.data)
         except Exception:
             licensed = {a["id"] for a in self.data["accounts"]}
+        has_identity = hasattr(self.store, "account_identities")   # task 003: o 'Dang bang' tung tai khoan
         cols = [("run", "Chạy", 48, "center"), ("name", "Tài khoản", 200, "w"), ("state", "Trạng thái", 130, "w"),
                 ("time", "Giờ đăng" if is_post else "Quét", 110, "w"), ("groups", "Nhóm", 130, "w"),
                 ("open", "", 90, "center")]
+        if has_identity:
+            cols.insert(2, ("as", "Đăng bằng ▾", 150, "w"))
+        col_open = f"#{len(cols)}"
+        col_as = "#3" if has_identity else None
         # bang trong khung vien (ban thiet ke 1), cao vua so tai khoan
         box = tk.Frame(parent, bg=PAGE_BG, highlightthickness=1, highlightbackground=LINE, highlightcolor=LINE)
         box.pack(fill="x")
@@ -3081,7 +3139,9 @@ class TreeConfigApp:
                                         "kết quả" + (", giờ đăng riêng" if is_post else "") + ")."
                                         + (" Tài khoản thứ 2, 3… tự lùi theo giãn cách để không đăng cùng lúc."
                                            if is_post else " Thời gian quét đặt ở tab 🔎 Theo dõi, mọi tài khoản "
-                                                           "dùng chung."),
+                                                           "dùng chung.")
+                                        + (" Bấm ô 'Đăng bằng' để chọn Cá nhân hay 1 Page của nick đó (Page lấy bằng "
+                                           "nút '🔄 Đọc danh sách Page' ở trang tài khoản)." if has_identity else ""),
                            style="Hint.TLabel", justify="left"), parent).pack_configure(pady=(8, 0))
 
         def visible():
@@ -3113,7 +3173,7 @@ class TreeConfigApp:
             tree.delete(*tree.get_children())
             accounts = visible()
             if not accounts:
-                tree.insert("", "end", values=("", "Chưa có tài khoản – thêm ở trang 👤 Tài khoản", "", "", "", ""),
+                tree.insert("", "end", values=("", "Chưa có tài khoản – thêm ở trang 👤 Tài khoản") + ("",) * (len(cols) - 2),
                             tags=["off"])
             for a in accounts:
                 ticked = a["id"] in s["accounts"]
@@ -3123,10 +3183,46 @@ class TreeConfigApp:
                          account_status.LABELS[self.account_state(a)["status"]] if not usable else "hoạt động")
                 when, joined = k.member_columns(self, s, a) if ticked and hasattr(k, "member_columns") else ("—", "—")
                 action = "" if out else ("🔑 Đăng nhập" if not usable else ("Mở ›" if ticked else ""))
-                tree.insert("", "end", iid=a["id"], values=("☑" if ticked else "☐", self.account_label(a, 40), state,
-                                                            when, joined, action),
+                values = ["☑" if ticked else "☐", self.account_label(a, 40), state, when, joined, action]
+                if has_identity:
+                    values.insert(2, as_text(a) if ticked else "—")
+                tree.insert("", "end", iid=a["id"], values=values,
                             tags=["off"] if out else (["bad"] if not usable else (["on"] if ticked else [])))
             redraw_pills()
+
+        def as_text(a):
+            ident = str((s.get("post_as") or {}).get(a["id"]) or "self")
+            if ident == "self":
+                return "👤 Cá nhân"
+            hit = next((x for x in self.store.account_identities(a) if x["id"] == ident), None)
+            if hit is None or hit.get("missing"):
+                return f"⚠ Page không còn ({hit['name'] if hit else ident})"
+            return f"📄 {hit['name']}"
+
+        def pick_identity(a, event):
+            """Menu chon danh tinh 'Dang bang' cho tai khoan a trong kich ban nay."""
+            menu = tk.Menu(tree, tearoff=0)
+            cur = str((s.get("post_as") or {}).get(a["id"]) or "self")
+
+            def choose(ident):
+                post_as = s.setdefault("post_as", {})
+                if ident == "self":
+                    post_as.pop(a["id"], None)
+                else:
+                    post_as[a["id"]] = ident
+                changed()
+            for x in self.store.account_identities(a):
+                label = ("👤 Cá nhân: " if x["id"] == "self" else "📄 ") + (x.get("name") or x["id"]) + \
+                        ("   (không còn thấy)" if x.get("missing") else "")
+                menu.add_command(label=("✓  " if x["id"] == cur else "     ") + label,
+                                 command=lambda i=x["id"]: choose(i))
+            menu.add_separator()
+            menu.add_command(label="🔄 Đọc danh sách Page… (trang tài khoản)",
+                             command=lambda: self.select(f"account:{a['id']}"))
+            try:
+                menu.tk_popup(event.x_root, event.y_root)
+            finally:
+                menu.grab_release()
 
         def on_click(e):
             iid = tree.identify_row(e.y)
@@ -3135,8 +3231,10 @@ class TreeConfigApp:
             col = tree.identify_column(e.x)
             if col == "#1":
                 toggle(iid)
-            elif col == "#6":   # cot hanh dong: Mo › (da tick) / Dang nhap (chua dang nhap)
-                action = tree.item(iid, "values")[5]
+            elif col_as and col == col_as and iid in s["accounts"]:
+                pick_identity(self.store.find_account(self.data, iid), e)
+            elif col == col_open:   # cot hanh dong: Mo › (da tick) / Dang nhap (chua dang nhap)
+                action = tree.item(iid, "values")[len(cols) - 1]
                 if action.startswith("🔑"):
                     self.select(f"account:{iid}")
                 elif action:
@@ -3169,7 +3267,9 @@ class TreeConfigApp:
         top.pack(fill="x")
         ttk.Label(top, text=f"👤  {self.account_label(account)}", style="Title.TLabel").pack(side="left")
         ttk.Button(top, text="✎ Sửa kịch bản", command=lambda: self.select(f"scenario:{s['id']}")).pack(side="right")
-        ttk.Label(self.right, text=f"chạy {k.ITEM_ICON} {s['name']}", style="Sub.TLabel").pack(anchor="w")
+        as_name = self.identity_label(account, item)
+        ttk.Label(self.right, text=f"chạy {k.ITEM_ICON} {s['name']}" + (f"   ·   đăng bằng Page '{as_name}'" if as_name
+                                                                       else ""), style="Sub.TLabel").pack(anchor="w")
         if item is None:
             ttk.Label(self.right, text="Chưa có dữ liệu – bấm Lưu.", style="Hint.TLabel").pack(anchor="w")
             return
@@ -3525,6 +3625,44 @@ class TreeConfigApp:
     def account_dir(self, account):
         return self.store.ACCOUNTS_DIR / account["id"]
 
+    def item_dir(self, account, item):
+        """Task 003: thu muc du lieu cua muc theo danh tinh 'Dang bang' (Ca nhan = account_dir nhu cu).
+        Loi (id la) -> thu muc khong co that (bang trong, KHONG lan so lieu Ca nhan)."""
+        get = getattr(self.store, "campaign_data_dir", None)
+        if not get or not item or (item.get("post_as") or "self") == "self":
+            return self.account_dir(account)
+        try:
+            return get(account, item)
+        except Exception:
+            return self.account_dir(account) / "danh_tinh" / "_"
+
+    def identity_dirs(self, account):
+        """Moi thu muc danh tinh cua tai khoan (so lieu ca tai khoan = cong lai)."""
+        ids = getattr(self.store, "account_identity_ids", None)
+        out = [self.account_dir(account)]
+        for ident in (ids(account) if ids else []):
+            if ident != "self":
+                try:
+                    out.append(self.store.identity_data_dir(account["id"], ident))
+                except Exception:
+                    pass
+        return out
+
+    def identity_label(self, account, item):
+        """Ten Page cua muc ('' = Ca nhan)."""
+        if not item or (item.get("post_as") or "self") == "self":
+            return ""
+        return item.get("post_as_name") or item.get("post_as", "")
+
+    def page_open_hint(self, account, item):
+        """Cau PM 8: Chrome that mo o Ca nhan -> nhac tu chuyen sang Page."""
+        name = self.identity_label(account, item)
+        if name:
+            messagebox.showinfo("Mở bằng Page", f"Chrome của '{account['name']}' mở ở CÁ NHÂN (tool không tự chuyển "
+                                                f"trong Chrome bạn tự dùng).\n\nMuốn xem bằng Page '{name}': bấm ảnh đại "
+                                                f"diện góc phải trên → 'Chuyển sang {name}'.\nXem xong nhớ chuyển về Cá "
+                                                "nhân rồi đóng Chrome (tool cũng tự chuyển lại ở lượt sau).")
+
     def account_state(self, account):
         return account_status.read(self.account_dir(account))
 
@@ -3874,7 +4012,7 @@ class TreeConfigApp:
         k = self.kind(item).RESULT_KIND
         if not k:
             return -1
-        rows = result_rows(self.account_dir(account), self.item_groups(account, item), k)
+        rows = result_rows(self.item_dir(account, item), self.item_groups(account, item), k)
         if k == "comments":
             notes, cstats = self.store.pause_notes(account, item), self.comment_stats(account, item)
             levels = [self.group_report(r, notes, cstats, k)[0] for r in rows]
@@ -3888,7 +4026,7 @@ class TreeConfigApp:
     def results_summary(self, parent, account, item):
         """1 dong tom tat duoi o danh sach nhom."""
         k = self.kind(item).RESULT_KIND
-        rows = result_rows(self.account_dir(account), self.item_groups(account, item), k)
+        rows = result_rows(self.item_dir(account, item), self.item_groups(account, item), k)
         total = lambda tab: sum((r["info"].get(tab) or {}).get(k, 0) for r in rows)
         if not any(r["info"] for r in rows) and not any(r["sent7"] for r in rows):
             return
@@ -3912,7 +4050,7 @@ class TreeConfigApp:
         """Trang thai hien tai (theo lan 'Cap nhat' gan nhat) cua cac dong 'da gui' -> {id(dong): (trang thai, gio kiem)}."""
         import fb_login
         k = self.kind(item).RESULT_KIND
-        st = fb_login.load_results(self.account_dir(account))
+        st = fb_login.load_results(self.item_dir(account, item))
         names = {g.get("name"): slug for slug, g in st["groups"].items() if g.get("name")}
         snip = fb_login.text_snippet(item.get("share_text" if k == "posts" else "comment_text", ""))
         groups, out = {}, {}
@@ -4102,7 +4240,7 @@ class TreeConfigApp:
             else:
                 banner.pack_forget()
             table.clear()
-            rows = result_rows(acc_dir, self.item_groups(account, item), k)
+            rows = result_rows(self.item_dir(account, item), self.item_groups(account, item), k)
             # Xau truoc (do, vang), roi tot (xanh), cuoi cung la nhom chua co gi (trang)
             order = {3: 0, 2: 1, 0: 2, 1: 3}
             cstats = self.comment_stats(account, item) if k == "comments" else None
@@ -4155,6 +4293,7 @@ class TreeConfigApp:
                                      "--account", account["id"]], cwd=self.base_dir, creationflags=NO_WINDOW,
                                     stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
             self.flash(f"Đang mở Chrome của '{account['name']}' ở trang 'Nội dung của bạn'… Xem xong thì ĐÓNG Chrome.")
+            self.page_open_hint(account, item)
             self.root.after(4000, lambda: proc.poll() == 4 and messagebox.showwarning(
                 "Tài khoản đang bận", f"'{account['name']}' đang chạy theo lịch (đăng bài / quét) → mở lại sau vài phút."))
 
@@ -4308,8 +4447,13 @@ class TreeConfigApp:
         """Chay ngam 'Cap nhat': vao Facebook xem lai cac nhom (Dang cho / Bi tu choi / Da go). False neu khong co nhom."""
         import fb_login
         campaigns = [item] if item else [c for c in account["campaigns"] if c.get("enabled", True)]
-        slugs = list(dict.fromkeys(fb_login.group_slug(g) for c in campaigns for g in self.item_groups(account, c)
-                                   if fb_login.group_slug(g)))
+        # Task 003: moi danh tinh 1 lan doc ket qua (Ca nhan truoc), chay noi tiep trong 1 Chrome moi lan.
+        by_identity = {}
+        for c in campaigns:
+            for g in self.item_groups(account, c):
+                if fb_login.group_slug(g):
+                    by_identity.setdefault(c.get("post_as") or "self", []).append(fb_login.group_slug(g))
+        slugs = [s for v in by_identity.values() for s in v]
         if not slugs or account["id"] in self._checks:
             return bool(slugs)
         acc_dir = self.account_dir(account)
@@ -4317,16 +4461,18 @@ class TreeConfigApp:
             (acc_dir / "kiem_tra_tien_do.json").unlink()
         except OSError:
             pass
-        cmd = [self.python, str(self.SCRIPT), "--check-results", "--account", account["id"], "--groups", ",".join(slugs)]
-        if item:
-            cmd += ["--campaign", item["id"]]
+        cmds = []
+        for ident in sorted(by_identity, key=lambda i: i != "self"):
+            cmd = [self.python, str(self.SCRIPT), "--check-results", "--account", account["id"], "--groups",
+                   ",".join(dict.fromkeys(by_identity[ident]))]
+            if item:
+                cmd += ["--campaign", item["id"]]
+            elif ident != "self":
+                cmd += ["--identity", ident]
+            cmds.append(cmd)
         # Loi khi chay (vd thoat ngay, chua kip ghi tien do) -> ghi ra file de giao dien bao lai.
-        err_file = open(acc_dir / CHECK_ERROR_FILE, "w", encoding="utf-8")
-        try:
-            self._checks[account["id"]] = subprocess.Popen(cmd, cwd=self.base_dir, creationflags=NO_WINDOW,
-                                                           stdout=subprocess.DEVNULL, stderr=err_file)
-        finally:
-            err_file.close()
+        err_path = acc_dir / CHECK_ERROR_FILE
+        self._checks[account["id"]] = _ChainProc(cmds, self.base_dir, err_path)
         self._check_done.pop(account["id"], None)
         self.watch_checks()
         return True
@@ -4339,7 +4485,7 @@ class TreeConfigApp:
         """
         import fb_login
         from datetime import datetime
-        st = fb_login.load_results(self.account_dir(account))
+        st = fb_login.load_results(self.item_dir(account, item))
         out, seen = [], set()
         # 1) Link bai that tu muc 'Da dang' cua tung nhom trong noi dung nay.
         for url in self.item_groups(account, item):
@@ -4386,9 +4532,9 @@ class TreeConfigApp:
                  "failed": "❌ lỗi"}
     CARE_BG = {"visible": "#e3f5e6", "sent": "#eef3fb", "failed": "#fde2e1"}
 
-    def care_state(self, account):
+    def care_state(self, account, item=None):
         import fb_login
-        return fb_login.load_care_state(self.account_dir(account))
+        return fb_login.load_care_state(self.item_dir(account, item))
 
     def care_cell(self, care, url):
         import fb_login
@@ -4452,6 +4598,7 @@ class TreeConfigApp:
             self.flash(f"Đang mở {len(posts)} bài bằng Chrome của '{account['name']}' để bạn tự chăm (xong thì đóng "
                        "Chrome).")
             win.destroy()
+            self.page_open_hint(account, item)
 
         def comment():
             text = text_now()
@@ -4460,7 +4607,8 @@ class TreeConfigApp:
                 return
             keep_text()
             proc = subprocess.Popen([self.python, str(self.SCRIPT), "--comment-posts", "--account", account["id"],
-                                     "--urls", "|".join(p["url"] for p in posts), "--text", text],
+                                     "--urls", "|".join(p["url"] for p in posts), "--text", text]
+                                    + self.identity_args(item),
                                     cwd=self.base_dir, creationflags=NO_WINDOW,
                                     stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
             self.flash(f"💬 Đang bình luận vào {len(posts)} bài (chạy ngầm) – cột 'Chăm bài' tự cập nhật.")
@@ -4475,12 +4623,18 @@ class TreeConfigApp:
         ttk.Button(bottom, text="Hủy", command=win.destroy).pack(side="right", padx=(0, 8))
         win.grab_set()
 
-    def open_in_account(self, account, url):
+    def identity_args(self, item):
+        """['--identity', id Page] cho lenh chay tu 1 muc dang bang Page (Ca nhan -> [] nhu cu)."""
+        ident = (item or {}).get("post_as") or "self"
+        return [] if ident == "self" else ["--identity", ident]
+
+    def open_in_account(self, account, url, item=None):
         """Mo link bang Chrome cua tai khoan (dang nhap san -> thay ca bai / binh luan dang cho duyet)."""
         proc = subprocess.Popen([self.python, str(self.SCRIPT), "--open-url", url, "--account", account["id"]],
                                 cwd=self.base_dir, creationflags=NO_WINDOW,
                                 stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         self.flash(f"Đang mở bài bằng Chrome của '{account['name']}'… Xem xong thì ĐÓNG Chrome để tool chạy tiếp.")
+        self.page_open_hint(account, item)
 
         def busy():
             if proc.poll() == 4 and messagebox.askyesno(
@@ -4562,9 +4716,9 @@ class TreeConfigApp:
         # ---- bang
         def fill():
             import fb_login
-            names = {slug: g.get("name") for slug, g in fb_login.load_results(self.account_dir(account))["groups"].items()
+            names = {slug: g.get("name") for slug, g in fb_login.load_results(self.item_dir(account, item))["groups"].items()
                      if g.get("name")}   # ma nhom (tu link bai) -> ten nhom
-            care = self.care_state(account)
+            care = self.care_state(account, item)
             table.clear()
             if care_var.get():
                 fill_approved(names, care)
@@ -4630,7 +4784,7 @@ class TreeConfigApp:
             if st.get("note") and not rows:
                 stats.configure(text=st["note"])
             elif care_var.get():
-                care = self.care_state(account)
+                care = self.care_state(account, item)
                 state = [care.get(fb_login_post_id(p["url"]), {}).get("status", "") for p in rows]
                 done = sum(s in ("sent", "visible") for s in state)   # cung cach dem voi o 'bai da cham' o tren
                 wait = sum(s in ("queued", "sending") for s in state)
@@ -4747,13 +4901,13 @@ class TreeConfigApp:
 
         def verify_care():
             """Sau 'Cap nhat ngay': mo lai cac bai 'da binh luan' xem binh luan da hien chua."""
-            care = self.care_state(account)
+            care = self.care_state(account, item)
             urls = [p["url"] for p in self.approved_posts(account, item)
                     if care.get(fb_login_post_id(p["url"]), {}).get("status") == "sent"]
             if not urls or not self.account_usable(account):
                 return
             st["proc"] = subprocess.Popen([self.python, str(self.SCRIPT), "--verify-care", "--account", account["id"],
-                                           "--urls", "|".join(urls)], cwd=self.base_dir, creationflags=NO_WINDOW,
+                                           "--urls", "|".join(urls)] + self.identity_args(item), cwd=self.base_dir, creationflags=NO_WINDOW,
                                           stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
             watch_care()
 
@@ -4819,7 +4973,7 @@ class TreeConfigApp:
                 import fb_login
                 slug = fb_login.group_slug(e["url"])
                 target = e["url"] if fb_login.post_id_of(e["url"]) or not slug else fb_login.content_url(slug)
-                self.open_in_account(account, target)
+                self.open_in_account(account, target, item)
             elif e.get("image"):
                 open_image(e)
 
