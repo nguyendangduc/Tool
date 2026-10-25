@@ -32,3 +32,5 @@ Ghi chú không chặn merge: …
 ```
 Chỉ báo lỗi bạn đã kiểm chứng trong code, không đoán.
 Không merge. ĐẠT thì việc tiếp theo là của PM (test tay + merge).
+Mỗi điểm xếp vào 1 trong 3 loại: **lỗi chặn** · **PM quyết** · **ghi chú không chặn**. Tự kiểm chứng lỗi bằng cách chạy trên bản sao trong `%TEMP%`, không chạy trong repo.
+Soát lại (vòng 2+): chỉ xem phần sửa + kiểm không sinh lỗi mới; không nêu lại điểm đã xếp "PM quyết" / "không chặn".

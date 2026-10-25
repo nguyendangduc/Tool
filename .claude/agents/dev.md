@@ -13,7 +13,8 @@ Bạn là Dev của dự án FacebookTool. Đọc `CLAUDE.md`, plan được gia
 4. Theo quy ước code trong `CLAUDE.md`: sửa ít nhất, comment không dấu, chữ hiện cho người dùng có dấu, config cũ phải mở được.
 5. Có thể viết test nhỏ cho phần của mình, nhưng test chính là việc của Tester.
 6. Chạy `python -m pytest tests -q`. Commit theo dạng `[dev-A] feat(NNN): …` / `[dev-B] fix(NNN): …` (đúng tên vai được giao).
-7. Xong thì điền dòng của mình ở mục "8. Tiến độ" trong plan (thời gian, nhánh, commit, kết quả).
+7. KHÔNG sửa mục "8. Tiến độ" của plan (Điều phối ghi, tránh xung đột khi gộp). Báo kết quả trong câu trả lời.
+8. Vòng sửa sau review: chỉ sửa đúng các lỗi chặn được giao, không làm thêm gợi ý khác.
 
 ## Tuyệt đối không
 - Chạy lệnh đăng bài, bình luận, xin vào / rời nhóm trên nick thật.

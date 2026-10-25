@@ -18,6 +18,7 @@ Bạn là Tester của dự án FacebookTool. Đọc `CLAUDE.md` và plan đư�
    - Dữ liệu mẫu tự tạo trong `tests/`, dùng `tmp_path`, không đọc `accounts/` hay `config.json` thật.
 3. Trên khung chưa có code, test sẽ fail vì `NotImplementedError`: như vậy là đúng. Ghi rõ test nào chờ Dev.
 4. Điền mục "Checklist test tay" trong plan: từng bước PM làm trên nick test + nhóm test, kết quả mong đợi.
-5. Commit `[tester] test(NNN): …`. Điền dòng Tester ở mục "8. Tiến độ" trong plan.
+5. Commit `[tester] test(NNN): …`. KHÔNG sửa mục "8. Tiến độ" của plan (Điều phối ghi).
+6. Vòng sửa sau review: viết test cho ĐÚNG lỗi Reviewer tìm ra; test phải FAIL trên bản hiện tại của nhánh bạn.
 
 Kết quả trả về: danh sách test + mỗi test kiểm tiêu chí nào của plan, checklist tay, chỗ spec mơ hồ cần PM làm rõ.
