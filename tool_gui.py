@@ -18,6 +18,21 @@ import upstt_store
 LICENSE_WARN_DAYS = 7   # con <= 7 ngay -> canh bao o Tong quan + thanh trai
 
 
+def post_as(s, account_id):
+    """Task 003: danh tinh 'Dang bang' cua tai khoan trong kich ban ("self" = Ca nhan)."""
+    return str((s.get("post_as") or {}).get(account_id) or "self")
+
+
+def join_state(account_id, identity="self"):
+    """Trang thai vao nhom theo danh tinh (Ca nhan: goi y nhu cu)."""
+    if identity in ("", None, "self"):
+        return upstt_store.join_state(account_id)
+    try:
+        return upstt_store.join_state(account_id, identity=identity)
+    except Exception:
+        return {}
+
+
 class PostKind:
     """Noi dung dang bai vao nhom (fb_upstt.py), moi muc 1 lich theo gio."""
     KEY = store.POST
@@ -383,10 +398,16 @@ class PostKind:
         count.pack(side="left")
         ttk.Button(act, text="🗑  Xóa khỏi kịch bản", command=lambda: self.remove_groups(s, picked_urls())).pack(
             side="right")
-        ttk.Button(act, text="🚪  Rời nhóm", command=lambda: self.scope_action(s, "leave", picked_urls())).pack(
-            side="right", padx=(0, 6))
-        ttk.Button(act, text="🙋  Xin vào", command=lambda: self.scope_action(s, "join", picked_urls())).pack(
-            side="right", padx=(0, 6))
+        leave_btn = ttk.Button(act, text="🚪  Rời nhóm", command=lambda: self.scope_action(s, "leave", picked_urls()))
+        leave_btn.pack(side="right", padx=(0, 6))
+        join_btn = ttk.Button(act, text="🙋  Xin vào", command=lambda: self.scope_action(s, "join", picked_urls()))
+        join_btn.pack(side="right", padx=(0, 6))
+        accounts = store.ticked_accounts(app.data, s)
+        if accounts and all(post_as(s, a["id"]) != "self" for a in accounts):   # cau PM 7
+            join_btn.state(["disabled"])
+            leave_btn.state(["disabled"])
+            ttk.Label(act, text="Xin vào / rời nhóm bằng Page: làm sau", style="Hint.TLabel").pack(side="right",
+                                                                                                padx=(0, 8))
         issues = ui.fit_wrap(ttk.Label(parent, text="", style="Warn.TLabel", justify="left"), parent)
         issues.pack_configure(pady=(6, 0))
         rule = ("Đăng theo lịch: mỗi tài khoản chỉ đăng nhóm nó ĐÃ VÀO." if s["kind"] == "post" else
@@ -530,6 +551,14 @@ class PostKind:
         if not accounts:
             messagebox.showinfo(f"{title} nhóm", "Kịch bản chưa tick tài khoản nào (tab '👥 Tài khoản chạy').")
             return
+        # Cau PM 7: tai khoan dang bang Page -> khong xin vao / roi bang Page (lam sau)
+        as_page = [a for a in accounts if post_as(s, a["id"]) != "self"]
+        accounts = [a for a in accounts if a not in as_page]
+        if not accounts:
+            messagebox.showinfo(f"{title} nhóm", "Các tài khoản của kịch bản đều ĐĂNG BẰNG PAGE.\n\n"
+                                                 f"{title} nhóm bằng Page: làm sau – hiện tool chỉ xin vào / rời "
+                                                 "bằng Cá nhân. Vào nhóm bằng Page: tự làm tay trên Facebook.")
+            return
 
         def todo(a):
             want = ("joined", "pending") if not joining else None
@@ -597,6 +626,9 @@ class PostKind:
                                                    ("đã vào / đã xin hết" if joining else "không ở nhóm nào trong số này")))
             skipped = [a["name"] for _v, a, _c, usable in checks if not usable]
             preview.configure(text=("Sẽ làm:\n" + "\n".join(lines)) if lines else "Chưa chọn tài khoản nào.")
+            if as_page:
+                preview.configure(text=preview.cget("text") + "\nBỏ qua (đăng bằng Page – xin vào / rời bằng Page: làm "
+                                  "sau): " + ", ".join(a["name"] for a in as_page))
             if skipped and mode.get() == "all":
                 preview.configure(text=preview.cget("text") + "\nBỏ qua (chưa đăng nhập): " + ", ".join(skipped))
 
@@ -647,8 +679,9 @@ class PostKind:
             messagebox.showinfo("Cập nhật trạng thái", "Kịch bản chưa có tài khoản nào đã đăng nhập.")
             return
         urls = "|".join(s["settings"].get("groups", []))   # nhom kich ban da vao ma chua xac minh -> xac minh luon
-        self.run_accounts([(a, ["--joined-groups"] + (["--urls", urls] if urls else [])) for a in accounts],
-                          "Cập nhật trạng thái", done=self.refresh_groups)
+        self.run_accounts([(a, ["--joined-groups"] + (["--urls", urls] if urls else [])
+                            + ([] if post_as(s, a["id"]) == "self" else ["--identity", post_as(s, a["id"])]))
+                           for a in accounts], "Cập nhật trạng thái", done=self.refresh_groups)
 
     # ---------------------------------------------------------------- chay lan luot tung tai khoan
     def run_accounts(self, jobs, title, done=None):
@@ -1697,7 +1730,7 @@ class ToolApp(ui.TreeConfigApp):
         ttk.Button(row, text="Nhập key mới", command=self.show_license, style="Small.TButton").pack(side="left",
                                                                                                 padx=(6, 0))
 
-    def extra_alerts(self):
+    def _license_alerts(self):
         st = ban_quyen.trang_thai()
         go = lambda: self.show_page("settings")
         if not st["ok"]:
@@ -1832,6 +1865,211 @@ class ToolApp(ui.TreeConfigApp):
 
     def schedule_key(self, entries):
         return [(e["task"], e.get("every"), e.get("max"), e.get("times"), e.get("weekdays")) for e in entries]
+
+    # ================================================================ task 003: Ca nhan & Page, gop tai khoan
+    def identities_tab(self, parent, account):
+        """Tab tai khoan: danh tinh cua nick (Ca nhan + Page) + nut 'Doc danh sach Page'."""
+        from datetime import datetime
+        box = ui.Box(parent, text="Cá nhân & Page của nick")
+        box.pack(fill="x")
+        if self.account_usable(account):
+            box.add_button("🔄 Đọc danh sách Page", lambda: self.read_identities(account))
+        try:
+            import fb_login
+            read_at = fb_login.load_identities_file(self.account_dir(account)).get("time") or 0
+        except Exception:
+            read_at = 0
+        ttk.Label(box, text=(f"Đọc từ Facebook lúc {datetime.fromtimestamp(read_at):%H:%M %d/%m}" if read_at else
+                             "Chưa đọc danh sách Page – bấm '🔄 Đọc danh sách Page' (tool mở Facebook chạy ngầm, chỉ "
+                             "xem; nick có nhiều Page có thể mất vài phút)."), style="Hint.TLabel").pack(anchor="w")
+        identities = store.account_identities(account)
+        tbox, tree = PostKind.make_table(box, [("name", "Danh tính", 260, True, "w"), ("kind", "Loại", 90, False, "w"),
+                                               ("used", "Kịch bản đăng bằng", 140, False, "w"),
+                                               ("note", "Ghi chú", 220, False, "w")],
+                                         height=max(2, min(8, len(identities))))
+        tbox.pack(fill="x", pady=(6, 0))
+        for x in identities:
+            used = sum(1 for s in self.data["scenarios"] if account["id"] in s["accounts"]
+                       and post_as(s, account["id"]) == x["id"])
+            tree.insert("", "end", values=(x.get("name") or x["id"], "👤 Cá nhân" if x["id"] == "self" else "📄 Page",
+                                           used or "—", "⚠ lần đọc gần nhất không thấy" if x.get("missing") else ""),
+                        tags=["warn"] if x.get("missing") else [])
+        ui.fit_wrap(ttk.Label(box, text="1 nick = 1 tài khoản trong tool (1 Chrome, đăng nhập 1 lần). Muốn đăng bằng Page: "
+                                        "mở kịch bản → '👥 Tài khoản chạy' → bấm ô 'Đăng bằng' của tài khoản này. Tool "
+                                        "tự chuyển sang Page khi chạy và chuyển về Cá nhân khi xong. Page không còn "
+                                        "thấy vẫn giữ (kịch bản đang trỏ tới) – chọn lại 'Đăng bằng' nếu cần.",
+                              style="Hint.TLabel", justify="left"), box).pack_configure(pady=(6, 0))
+
+    def read_identities(self, account, then=None):
+        """Chay '--read-identities --account aN' -> doc danh_tinh.json -> update_identities -> Luu."""
+        import fb_login
+        acc_dir = self.account_dir(account)
+
+        def handle(_acc, code):
+            if code == 3:
+                messagebox.showwarning("Đọc danh sách Page", f"'{account['name']}' chưa đăng nhập Facebook.")
+                return
+            if code == 4:
+                messagebox.showwarning("Đọc danh sách Page", f"'{account['name']}' đang chạy (đăng bài / quét) – "
+                                                             "đợi vài phút rồi bấm lại.")
+                return
+            try:
+                found = fb_login.load_identities_file(acc_dir).get("identities") or []
+                res = store.update_identities(account, found) if code == 0 else None
+            except Exception:
+                res = None
+            if res is None:
+                p = ui.fb_login_progress(acc_dir)
+                messagebox.showwarning("Đọc danh sách Page", "Chưa đọc được danh sách Page"
+                                       + (f": {p['text']}" if p.get("text") else ".") + "\nThử lại sau ít phút.")
+                return
+            self.mark_dirty()
+            self.save(quiet=True)
+            pages = len(store.account_identities(account)) - 1
+            parts = [f"{pages} Page"] + ([f"mới: {', '.join(res['added'])}"] if res["added"] else []) \
+                + ([f"đổi tên: {', '.join(f'{a} → {b}' for a, b in res['renamed'])}"] if res["renamed"] else []) \
+                + ([f"không còn thấy: {', '.join(res['missing'])}"] if res["missing"] else [])
+            self.flash(f"👤 {account['name']}: Cá nhân + " + " · ".join(parts))
+            if self.current == ("account", account["id"]):
+                self.on_select(force=True)
+            if then:
+                then()
+        if self.has_changes() and not self.save(quiet=True):
+            return
+        self.KINDS[store.POST].run_accounts([(account, ["--read-identities"])], "Đọc danh sách Page", on_each=handle)
+        self.flash(f"⏳ Đang đọc danh sách Page của '{account['name']}' (chạy ngầm, chỉ xem)…")
+
+    def same_nick_banner(self, parent, account):
+        """Canh bao 'N tai khoan chung 1 nick' o trang tai khoan + nut Gop vao …"""
+        group = next((g for g in store.same_uid_groups(self.data) if account["id"] in g), None)
+        if not group:
+            return
+        bar = ttk.Frame(parent, padding=(10, 6))
+        bar.pack(fill="x", pady=(6, 0))
+        names = ", ".join(f"'{store.find_account(self.data, i)['name']}'" for i in group)
+        ui.fit_wrap(ttk.Label(bar, text=f"⚠ {len(group)} tài khoản chung 1 nick Facebook: {names}. Facebook thấy 1 người "
+                                        "đăng nhập trên nhiều Chrome → dễ bị đá cả các phiên. Nên gộp thành 1 tài khoản "
+                                        "(Page thành 'Đăng bằng').", style="Warn.TLabel", justify="left"), bar)
+        ttk.Button(bar, text="Gộp vào …", style="Accent.TButton" if ui.sv_ttk else "TButton",
+                   command=lambda: self.merge_dialog(group)).pack(anchor="e", pady=(4, 0))
+
+    def extra_alerts(self):
+        out = self._license_alerts()
+        for group in store.same_uid_groups(self.data):
+            names = ", ".join(store.find_account(self.data, i)["name"] for i in group)
+            out.append(("warn", f"{len(group)} tài khoản chung 1 nick: {names}",
+                        "1 nick nên là 1 tài khoản (Page chọn ở 'Đăng bằng') – bấm Gộp, có hộp xác nhận",
+                        "Gộp vào …", lambda g=group: self.merge_dialog(g)))
+        left = store.merged_leftovers(self.data)
+        if left:
+            out.append(("warn", f"Chrome của {len(left)} tài khoản đã gộp chưa đăng xuất / xoá được: {', '.join(left)}",
+                        "đăng xuất Facebook + xoá Chrome thừa để Facebook không thấy nhiều thiết bị", "Thử lại",
+                        self.retry_merged_logout))
+        return out
+
+    def merge_dialog(self, group):
+        """Hop 'Gop vao …': chon tai khoan chinh (cau PM 10) -> xem truoc (merge_plan) -> Gop."""
+        import tkinter as tk
+        names = {i: store.find_account(self.data, i)["name"] for i in group}
+        win = tk.Toplevel(self.root)
+        win.title("Gộp tài khoản chung 1 nick")
+        win.geometry("720x520")
+        win.transient(self.root)
+        frame = ttk.Frame(win, padding=16)
+        frame.pack(fill="both", expand=True)
+        ttk.Label(frame, text=f"🔄  Gộp {len(group)} tài khoản chung 1 nick Facebook", style="Title.TLabel").pack(anchor="w")
+        row = ttk.Frame(frame)
+        row.pack(fill="x", pady=(8, 6))
+        ttk.Label(row, text="Tài khoản chính (giữ Chrome + đăng nhập):").pack(side="left")
+        labels = [f"{names[i]}  ({i})" for i in group]
+        main_var = tk.StringVar(value=labels[group.index(store.default_merge_main(self.data, group))])
+        combo = ttk.Combobox(row, values=labels, textvariable=main_var, state="readonly", width=30)
+        combo.pack(side="left", padx=(8, 0))
+        bf, text = ui.text_box(frame, 14, wrap="word")
+        bf.pack(fill="both", expand=True)
+        bottom = ttk.Frame(frame)
+        bottom.pack(fill="x", pady=(10, 0))
+        go = ttk.Button(bottom, text="Gộp", style="Accent.TButton" if ui.sv_ttk else "TButton")
+        go.pack(side="right")
+        ttk.Button(bottom, text="Hủy", command=win.destroy).pack(side="right", padx=(0, 8))
+        read_btn = ttk.Button(bottom, text="🔄 Đọc danh sách Page của tài khoản chính")
+        read_btn.pack(side="left")
+        state = {}
+
+        def main_id():
+            return group[labels.index(main_var.get())]
+
+        def show():
+            mid = main_id()
+            plan = store.merge_plan(self.data, mid, [i for i in group if i != mid])
+            state["plan"] = plan
+            body = plan["lines"] if plan["ok"] else (["⛔ Chưa gộp được:"] + [f"  • {e}" for e in plan["errors"]])
+            text.configure(state="normal")
+            text.delete("1.0", "end")
+            text.insert("1.0", "\n".join(body))
+            text.configure(state="disabled")
+            go.state(["!disabled"] if plan["ok"] else ["disabled"])
+            read_btn.state(["!disabled"] if self.account_usable(store.find_account(self.data, mid)) else ["disabled"])
+
+        def read():
+            win.destroy()
+            self.read_identities(store.find_account(self.data, main_id()), then=lambda: self.merge_dialog(group))
+
+        def run():
+            mid = main_id()
+            running = [names[i] for i in group if i in self.busy_accounts or i in self._checks
+                       or ui.account_process_alive(self.account_dir({"id": i}))]
+            if running:
+                messagebox.showwarning("Gộp", "Đang chạy: " + ", ".join(running) + ".\n\nĐợi chạy xong (hoặc bấm ⏸ Tạm "
+                                       "dừng toàn bộ) rồi gộp lại.", parent=win)
+                return
+            self.commit_form()
+            from datetime import datetime
+            try:
+                res = store.merge_accounts(self.data, mid, [i for i in group if i != mid],
+                                           datetime.now().strftime("%Y%m%d_%H%M%S"), state["plan"])
+            except OSError as e:
+                messagebox.showerror("Gộp", f"Chép dữ liệu lỗi – CHƯA gộp, cấu hình chưa đổi.\n\n{e}", parent=win)
+                return
+            win.destroy()
+            if not res.get("done"):
+                return
+            self.mark_dirty()
+            self.save(quiet=True)
+            self.refresh_tree(f"account:{mid}")
+            self.select(f"account:{mid}")
+            self.logout_merged([(i, names[i]) for i in res["logout"]], f"Đã gộp vào '{names[mid]}' (sao lưu: "
+                                                                          f"{res['backup']}).")
+        combo.bind("<<ComboboxSelected>>", lambda _e: show())
+        read_btn.configure(command=read)
+        go.configure(command=run)
+        show()
+        win.grab_set()
+
+    def logout_merged(self, items, head=""):
+        """'--logout --account <phu>' tung tai khoan da gop; loi -> canh bao (merged_leftovers + nut Thu lai)."""
+        failed = []
+        jobs = [({"id": i, "name": n}, ["--logout"]) for i, n in items]
+        if not jobs:
+            return
+
+        def each(acc, code):
+            if code != 0:
+                failed.append(acc["name"])
+
+        def done():
+            if failed:
+                messagebox.showwarning("Đăng xuất tài khoản đã gộp", (head + "\n\n" if head else "") +
+                                       "Chưa đăng xuất / xoá được Chrome của: " + ", ".join(failed) +
+                                       ".\n\nTrang Tổng quan sẽ hiện cảnh báo + nút 'Thử lại'.")
+            else:
+                self.flash((head + " " if head else "") + "Đã đăng xuất + xoá Chrome của tài khoản phụ.")
+            if self.page == "home":
+                self.refresh_page()
+        self.KINDS[store.POST].run_accounts(jobs, "Đăng xuất tài khoản đã gộp", done=done, on_each=each)
+
+    def retry_merged_logout(self):
+        self.logout_merged([(i, i) for i in store.merged_leftovers(self.data)])
 
 
 def main():

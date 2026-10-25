@@ -18,6 +18,7 @@ Cau truc config.json:
 """
 import json
 import shutil
+from pathlib import Path
 
 import monitor_store
 import upstt_store
@@ -259,6 +260,9 @@ def materialize(data):
                 cid = s["members"][account["id"]] = new_id(data, ID_PREFIX[s["kind"]])
             item = json.loads(json.dumps(settings))
             item.update(id=cid, name=s["name"], kind=s["kind"], enabled=bool(s["enabled"]), scenario=s["id"])
+            post_as = str((s.get("post_as") or {}).get(account["id"]) or SELF)
+            item["post_as"] = post_as
+            item["post_as_name"] = "" if post_as == SELF else identity_name(account, post_as)
             if s["kind"] == POST:
                 item["times"] = (custom_member_times(s, account["id"])
                                  or shift_times(item.get("times", []), int(s.get("gap_minutes") or 0) * i))
@@ -315,6 +319,50 @@ def remove_account_everywhere(data, account_id):
 # Hop dong: plans/003_mot_nick_nhieu_page.md muc 3. Du lieu theo danh tinh: fb_login.identity_dir().
 MERGE_MARKER = "da_gop.json"                     # accounts/<id phu>/da_gop.json {"into", "identity", "time"}
 MERGE_BACKUP = "config.truoc_gop_{stamp}.json"   # ban sao config.json truoc khi gop (o BASE_DIR)
+SELF = "self"                                    # = fb_login.IDENTITY_SELF (khong import fb_login o dau file)
+IDENTITY_DIR_NAME = "danh_tinh"                  # = fb_login.IDENTITY_DIR_NAME (chi de xem truoc duong dan)
+
+
+def _profile(account_id):
+    """fb_profile.json cua tai khoan ({} neu chua co / loi)."""
+    try:
+        data = json.loads((ACCOUNTS_DIR / account_id / "fb_profile.json").read_text(encoding="utf-8"))
+        return data if isinstance(data, dict) else {}
+    except Exception:
+        return {}
+
+
+def _norm_name(text):
+    return " ".join(str(text or "").split()).casefold()
+
+
+def identity_data_dir(account_id, identity_id=SELF):
+    """Thu muc du lieu cua danh tinh (ket qua, trang thai nhom, cham bai...) - giao dien doc theo post_as cua muc.
+
+    Ca nhan -> accounts/<id>/ (nhu cu, khong goi fb_login); Page -> fb_login.identity_dir (Dev A).
+    """
+    acc_dir = ACCOUNTS_DIR / account_id
+    if identity_id in (None, "", SELF):
+        return acc_dir
+    import fb_login
+    return fb_login.identity_dir(acc_dir, str(identity_id))
+
+
+def campaign_data_dir(account, campaign):
+    """Thu muc du lieu cua 1 muc (theo campaign["post_as"])."""
+    return identity_data_dir(account["id"], (campaign or {}).get("post_as") or SELF)
+
+
+def account_identity_ids(account):
+    """Id moi danh tinh co du lieu cua tai khoan: Ca nhan + Page trong danh sach + thu muc danh_tinh/<id> tren dia
+    (so lieu ca tai khoan = cong moi danh tinh)."""
+    ids = [x["id"] for x in account_identities(account)]
+    folder = ACCOUNTS_DIR / account["id"] / IDENTITY_DIR_NAME
+    try:
+        ids += sorted(p.name for p in folder.iterdir() if p.is_dir() and p.name.isdigit() and p.name not in ids)
+    except OSError:
+        pass
+    return ids
 
 
 def account_identities(account):
@@ -325,12 +373,24 @@ def account_identities(account):
     (ten: muc self da luu, khong co thi fb_profile.json, khong co nua thi account["name"]). Khong sua account.
     Loi: khong raise.
     """
-    raise NotImplementedError
+    saved = [dict(x) for x in (account.get("identities") or []) if isinstance(x, dict) and x.get("id")]
+    me = next((x for x in saved if str(x["id"]) == SELF), None)
+    pages = [dict(x, id=str(x["id"]), kind="page") for x in saved if str(x["id"]) != SELF]
+    if me is None:
+        me = {"id": SELF, "name": "", "kind": "self"}
+    me = dict(me, id=SELF, kind="self")
+    if not me.get("name"):
+        me["name"] = _profile(account.get("id", "")).get("name") or account.get("name", "")
+    return [me] + pages
 
 
 def identity_name(account, identity_id):
     """Ten danh tinh `identity_id` cua tai khoan ("self" -> ten ca nhan). Khong co -> "" (khong raise)."""
-    raise NotImplementedError
+    want = SELF if identity_id in (None, "") else str(identity_id)
+    try:
+        return next((x.get("name", "") for x in account_identities(account) if x["id"] == want), "")
+    except Exception:
+        return ""
 
 
 def update_identities(account, found):
@@ -340,7 +400,38 @@ def update_identities(account, found):
     Page cu khong con trong `found` -> GIU LAI + "missing": True (kich ban con tro toi); thay lai -> bo "missing".
     Ra: {"added": [ten], "renamed": [(cu, moi)], "missing": [ten]}. Loi: found rong / khong co "self" -> ValueError.
     """
-    raise NotImplementedError
+    found = [x for x in (found or []) if isinstance(x, dict) and x.get("id")]
+    if not found or not any(str(x["id"]) == SELF for x in found):
+        raise ValueError("danh sach danh tinh rong hoac thieu Ca nhan")
+    current = [dict(x) for x in (account.get("identities") or []) if isinstance(x, dict) and x.get("id")]
+    by_id = {str(x["id"]): x for x in current}
+    out = {"added": [], "renamed": [], "missing": []}
+    seen = set()
+    for f in found:
+        fid = str(f["id"])
+        name = str(f.get("name") or "").strip()
+        kind = "self" if fid == SELF else "page"
+        seen.add(fid)
+        old = by_id.get(fid)
+        if old is None:
+            old = by_id[fid] = {"id": fid, "name": name, "kind": kind}
+            current.append(old)
+            if kind == "page":
+                out["added"].append(name)
+            continue
+        if name and old.get("name") != name:
+            if old.get("name"):
+                out["renamed"].append((old["name"], name))
+            old["name"] = name
+        old.update(id=fid, kind=kind)
+        old.pop("missing", None)
+    for x in current:
+        if str(x["id"]) not in seen:
+            x["missing"] = True
+            out["missing"].append(x.get("name", ""))
+    account["identities"] = ([x for x in current if str(x["id"]) == SELF]
+                             + [x for x in current if str(x["id"]) != SELF])
+    return out
 
 
 def same_uid_groups(data):
@@ -349,7 +440,35 @@ def same_uid_groups(data):
     Ra: [[id tai khoan, ...], ...] - moi nhom >= 2 tai khoan, theo thu tu tren giao dien (thu tu data["accounts"]);
     tai khoan chua biet uid -> khong tinh. Khong co -> []. Loi doc file -> bo qua tai khoan do.
     """
-    raise NotImplementedError
+    groups = {}
+    for a in data.get("accounts", []):
+        uid = str(_profile(a["id"]).get("uid") or "")
+        if uid.isdigit():
+            groups.setdefault(uid, []).append(a["id"])
+    return [ids for ids in groups.values() if len(ids) >= 2]
+
+
+def default_merge_main(data, ids):
+    """Tai khoan chinh mac dinh khi gop (PM cau 10): tai khoan co ten Facebook = ten Ca nhan (theo danh sach danh
+    tinh da doc cua bat ky tai khoan nao trong nhom), khong co thi tai khoan dung dau."""
+    accounts = [find_account(data, i) for i in ids]
+    selves = {_norm_name(x.get("name")) for a in accounts if a for x in (a.get("identities") or [])
+              if isinstance(x, dict) and str(x.get("id")) == SELF and x.get("name")}
+    for a in accounts:
+        if a and _norm_name(_profile(a["id"]).get("name")) in selves:
+            return a["id"]
+    return ids[0] if ids else None
+
+
+def _identity_path_preview(main_id, identity_id):
+    """Duong dan danh tinh de HIEN (khong tao thu muc) - viec chep that dung fb_login.identity_dir."""
+    acc_dir = ACCOUNTS_DIR / main_id
+    return acc_dir if identity_id == SELF else acc_dir / IDENTITY_DIR_NAME / str(identity_id)
+
+
+def _identity_files():
+    import fb_login
+    return tuple(fb_login.IDENTITY_FILES)
 
 
 def merge_plan(data, main_id, other_ids):
@@ -366,7 +485,160 @@ def merge_plan(data, main_id, other_ids):
     ("Không thấy Page '<tên>' trong danh sách của '<main>' – bấm 'Đọc danh sách Page' ở tài khoản chính trước.").
     Loi: main_id / id phu khong co trong data -> ValueError.
     """
-    raise NotImplementedError
+    main = find_account(data, main_id)
+    if main is None:
+        raise ValueError(f"khong co tai khoan {main_id}")
+    others = []
+    for oid in other_ids:
+        if find_account(data, oid) is None:
+            raise ValueError(f"khong co tai khoan {oid}")
+        if oid != main_id and oid not in others:
+            others.append(oid)
+    errors, mapping = [], {}
+    main_uid = str(_profile(main_id).get("uid") or "")
+    identities = account_identities(main)
+    names = {x["id"]: x.get("name", "") for x in identities}
+    for oid in others:
+        other = find_account(data, oid)
+        if not main_uid.isdigit() or str(_profile(oid).get("uid") or "") != main_uid:
+            errors.append(f"'{other['name']}' không cùng nick Facebook với '{main['name']}' – không gộp được.")
+            continue
+        fb_name = _profile(oid).get("name", "")
+        if not _norm_name(fb_name):
+            errors.append(f"'{other['name']}' chưa có tên Facebook – bấm 'Kiểm tra đăng nhập' ở tài khoản đó trước.")
+            continue
+        hit = next((x["id"] for x in identities if _norm_name(x.get("name")) == _norm_name(fb_name)), None)
+        if hit is None:
+            errors.append(f"Không thấy Page '{fb_name}' trong danh sách của '{main['name']}' – bấm 'Đọc danh sách "
+                          "Page' ở tài khoản chính trước.")
+            continue
+        mapping[oid] = hit
+
+    # Kich ban: mo phong theo thu tu tick (tk phu dau tien thay cho chinh, cac tk sau tach / bo trung).
+    scenarios = []
+    for s in data.get("scenarios", []):
+        cur = (str((s.get("post_as") or {}).get(main_id) or SELF)) if main_id in s["accounts"] else None
+        split = set()
+        for aid in s["accounts"]:
+            if aid not in mapping:
+                continue
+            ident = mapping[aid]
+            if cur is None:
+                action, cur = "doi", ident
+            elif ident == cur or ident in split:
+                action = "bo_trung"
+            else:
+                action = "tach"
+                split.add(ident)
+            scenarios.append({"id": s["id"], "name": s["name"], "action": action, "account": aid, "identity": ident})
+
+    copies = []
+    try:
+        files = _identity_files()
+    except Exception:
+        files = ()
+    for oid, ident in mapping.items():
+        dst = _identity_path_preview(main_id, ident)
+        for name in files:
+            src = ACCOUNTS_DIR / oid / name
+            if src.exists():
+                copies.append([str(src), str(dst / name)])
+    backup = MERGE_BACKUP.format(stamp="<giờ gộp>")
+    label = lambda i: "Cá nhân" if i == SELF else f"Page '{names.get(i, i)}'"
+    acc_name = lambda i: find_account(data, i)["name"]
+    lines = [f"Gộp vào '{main['name']}' (giữ Chrome + đăng nhập của tài khoản này):"]
+    lines += [f"  • '{acc_name(o)}' → thành danh tính {label(i)} của '{main['name']}'" for o, i in mapping.items()]
+    if scenarios:
+        lines.append("Kịch bản:")
+    for x in scenarios:
+        who = names.get(x["identity"], x["identity"])
+        if x["action"] == "doi":
+            lines.append(f"  • '{x['name']}': '{acc_name(x['account'])}' → '{main['name']}' đăng bằng {label(x['identity'])}")
+        elif x["action"] == "bo_trung":
+            lines.append(f"  • '{x['name']}': bỏ '{acc_name(x['account'])}' ('{main['name']}' đã chạy bằng "
+                         f"{label(x['identity'])})")
+        else:
+            lines.append(f"  • '{x['name']}': '{main['name']}' đang chạy bằng danh tính khác → tách thành kịch bản mới "
+                         f"'{x['name']} ({who})' cho '{main['name']}' đăng bằng {label(x['identity'])}")
+    lines.append(f"Dữ liệu: chép {len(copies)} file (kết quả, trạng thái nhóm, chăm bài…) sang danh tính tương ứng của "
+                 f"'{main['name']}'. Thư mục cũ của tài khoản phụ giữ nguyên.")
+    lines.append(f"Sao lưu cấu hình trước khi gộp: {MERGE_BACKUP.format(stamp='<ngày giờ>')}")
+    if mapping:
+        lines.append("Sau khi gộp: đăng xuất Facebook + xoá Chrome của " + ", ".join(f"'{acc_name(o)}'" for o in mapping)
+                     + "; các tài khoản này biến mất khỏi danh sách.")
+    if not others:
+        errors.append("Chưa chọn tài khoản phụ nào để gộp.")
+    return {"ok": not errors, "errors": errors, "main": main_id, "mapping": mapping, "scenarios": scenarios,
+            "copies": copies, "logout": list(mapping), "backup": backup, "lines": lines}
+
+
+def _read_json(path):
+    try:
+        return json.loads(Path(path).read_text(encoding="utf-8"))
+    except Exception:
+        return None
+
+
+def _merge_file(src, dst):
+    """Chep src -> dst; dst da co -> gop (ket_qua.json: merge_results; json dict: giu dich + them khoa thieu;
+    .txt: gop dong). OSError -> raise."""
+    dst.parent.mkdir(parents=True, exist_ok=True)
+    if not dst.exists():
+        shutil.copy2(src, dst)
+        return
+    if src.suffix == ".txt":
+        old = dst.read_text(encoding="utf-8", errors="replace").splitlines()
+        new = src.read_text(encoding="utf-8", errors="replace").splitlines()
+        have = set(old)
+        extra = [x for x in new if x.strip() and x not in have]
+        if extra:
+            dst.write_text("\n".join(old + extra) + "\n", encoding="utf-8")
+        return
+    a, b = _read_json(dst), _read_json(src)
+    if src.name == "ket_qua.json":
+        import chuyen_du_lieu
+        merged = chuyen_du_lieu.merge_results(a if isinstance(a, dict) else {}, b if isinstance(b, dict) else {})
+    elif isinstance(a, dict) and isinstance(b, dict):
+        merged = dict(a)
+        for key, value in b.items():
+            merged.setdefault(key, value)
+    elif a is None and b is not None:
+        merged = b
+    else:
+        return
+    dst.write_text(json.dumps(merged, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
+def _merge_pause(main_dir, other_dir):
+    """Tk phu dang tam nghi lau hon -> tai khoan chinh nghi toi cung luc (tam nghi theo nick, cau PM 5)."""
+    import fb_login
+    other, mine = fb_login.nick_pause(other_dir), fb_login.nick_pause(main_dir)
+    if not other or (mine and float(mine.get("until", 0)) >= float(other.get("until", 0))):
+        return
+    path = fb_login._pause_file(main_dir)
+    info = dict(other, strikes=max(int(other.get("strikes", 1) or 1), int((mine or {}).get("strikes", 0) or 0)))
+    path.write_text(json.dumps(info, ensure_ascii=False), encoding="utf-8")
+
+
+def _move_member(s, old, new, identity):
+    """Chuyen o tick / id muc / gio rieng cua `old` sang `new` trong kich ban s (tai cho)."""
+    s["accounts"] = [new if a == old else a for a in s["accounts"]]
+    for key in ("members", "member_times"):
+        d = s.setdefault(key, {})
+        if old in d:
+            d[new] = d.pop(old)
+    post_as = s.setdefault("post_as", {})
+    post_as.pop(old, None)
+    if identity == SELF:
+        post_as.pop(new, None)
+    else:
+        post_as[new] = identity
+
+
+def _drop_member(s, aid):
+    s["accounts"] = [a for a in s["accounts"] if a != aid]
+    for key in ("members", "member_times", "post_as"):
+        (s.get(key) or {}).pop(aid, None)
 
 
 def merge_accounts(data, main_id, other_ids, stamp, plan=None):
@@ -387,13 +659,81 @@ def merge_accounts(data, main_id, other_ids, stamp, plan=None):
         (dang xuat Facebook + xoa browser_profile) -> cap nhat lich.
     Loi: OSError khi chep -> raise (config chua luu, backup con nguyen). ValueError nhu merge_plan.
     """
-    raise NotImplementedError
+    import time
+    import fb_login
+    plan = plan or merge_plan(data, main_id, other_ids)
+    if not plan.get("ok"):
+        return dict(plan, done=False)
+    mapping = plan["mapping"]
+    main = find_account(data, main_id)
+    main_dir = ACCOUNTS_DIR / main_id
+    # 1. backup (config.json that; chua co file -> ghi ban dang mo)
+    backup = BASE_DIR / MERGE_BACKUP.format(stamp=stamp)
+    if CONFIG_JSON.exists():
+        shutil.copy2(CONFIG_JSON, backup)
+    else:
+        backup.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+    # 2. chep du lieu (chua dong vao data -> loi o day thi du lieu trong bo nho van nguyen)
+    files = _identity_files()
+    for oid, ident in mapping.items():
+        src_dir = ACCOUNTS_DIR / oid
+        dst_dir = Path(fb_login.identity_dir(main_dir, ident))
+        for name in files:
+            if (src_dir / name).exists():
+                _merge_file(src_dir / name, dst_dir / name)
+        if (src_dir / "commented_ids.txt").exists():
+            _merge_file(src_dir / "commented_ids.txt", main_dir / "commented_ids.txt")
+        try:
+            _merge_pause(main_dir, src_dir)
+        except Exception as e:
+            print(f"[GOP] khong chep duoc tam nghi cua {oid}: {e}")
+    for oid, ident in mapping.items():
+        (ACCOUNTS_DIR / oid / MERGE_MARKER).write_text(
+            json.dumps({"into": main_id, "identity": ident, "time": time.time()}, ensure_ascii=False), encoding="utf-8")
+    # 3. kich ban
+    for x in plan["scenarios"]:
+        s = find_scenario(data, x["id"])
+        if s is None or x["account"] not in s["accounts"]:
+            continue
+        if x["action"] == "doi":
+            _move_member(s, x["account"], main_id, x["identity"])
+        elif x["action"] == "bo_trung":
+            _drop_member(s, x["account"])
+        else:   # tach (cau PM 6): ban sao chi tick tai khoan chinh, giu id muc cu cua tk phu
+            item = json.loads(json.dumps(s))
+            label = identity_name(main, x["identity"]) or x["identity"]
+            item.update(id=new_id(data, SCENARIO_PREFIX), name=f"{s['name']} ({label})", accounts=[x["account"]],
+                        members={k: v for k, v in s.get("members", {}).items() if k == x["account"]},
+                        member_times={k: v for k, v in (s.get("member_times") or {}).items() if k == x["account"]},
+                        post_as={})
+            if s["kind"] == POST and not item["member_times"]:   # giu gio dang cu cua tk phu (khong lui lai gio)
+                item["member_times"] = {x["account"]: default_member_times(data, s, x["account"])}
+            _move_member(item, x["account"], main_id, x["identity"])
+            data["scenarios"].insert(data["scenarios"].index(s) + 1, item)
+            _drop_member(s, x["account"])
+    # 4. bo tk phu
+    gone = set(mapping)
+    data["accounts"] = [a for a in data["accounts"] if a["id"] not in gone]
+    for oid in gone:
+        remove_account_everywhere(data, oid)
+    return dict(plan, done=True, backup=backup.name)
 
 
 def merged_leftovers(data):
     """Tai khoan da gop nhung Chrome chua dang xuat / xoa duoc: thu muc accounts/<id> co MERGE_MARKER + browser_profile,
     id khong con trong data["accounts"]. Ra: [id]. Giao dien hien canh bao + nut thu lai '--logout'."""
-    raise NotImplementedError
+    ids = {a["id"] for a in data.get("accounts", [])}
+    try:
+        dirs = sorted(p for p in ACCOUNTS_DIR.iterdir() if p.is_dir())
+    except OSError:
+        return []
+    return [p.name for p in dirs if p.name not in ids and (p / MERGE_MARKER).exists()
+            and (p / "browser_profile").exists()]
+
+
+def merge_marker(account_id):
+    """Noi dung da_gop.json cua tai khoan da gop ({} neu khong co)."""
+    return _read_json(ACCOUNTS_DIR / account_id / MERGE_MARKER) or {}
 
 
 # ---- anh binh luan cua kich ban theo doi: campaigns/<id kich ban>/ (co thu muc = chinh thuc),
@@ -479,6 +819,26 @@ def warnings(data):
     if idle:
         out = out or ["Nên xem lại:"]
         out.append(f"{len(idle)} kịch bản đang bật nhưng chưa tick tài khoản nào (chưa chạy): " + ", ".join(idle[:5]))
+    lost = lost_identities(data)
+    if lost:
+        out = out or ["Nên xem lại:"]
+        out.append(f"{len(lost)} mục 'Đăng bằng' Page không còn trong tài khoản (lượt chạy sẽ BỎ, không đăng bằng Cá "
+                   "nhân thay) – mở kịch bản → '👥 Tài khoản chạy' chọn lại: "
+                   + ", ".join(f"{s} – {a}" for s, a in lost[:5]))
+    return out
+
+
+def lost_identities(data):
+    """[(ten kich ban, ten tai khoan)] co post_as la Page khong con (khong co trong danh sach / 'missing')."""
+    out = []
+    for s in data.get("scenarios", []):
+        for aid, pid in (s.get("post_as") or {}).items():
+            account = find_account(data, aid)
+            if not account or aid not in s["accounts"] or str(pid or SELF) == SELF:
+                continue
+            hit = next((x for x in account_identities(account) if x["id"] == str(pid)), None)
+            if hit is None or hit.get("missing"):
+                out.append((s["name"], account["name"]))
     return out
 
 
@@ -561,7 +921,7 @@ def pause_notes(account, campaign):
 def reset_pause(account, kind, key, campaign=None):
     """kind cua ghi chu ('account' | 'group' | 'pending' | 'recovering'); campaign cho biet loai muc."""
     store = store_of(campaign) if campaign else upstt_store
-    store.reset_pause(account, kind, key)
+    store.reset_pause(account, kind, key, identity=(campaign or {}).get("post_as") or SELF)
 
 
 def image_path(campaign, n):
