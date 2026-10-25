@@ -1,0 +1,36 @@
+# Luu y: git KHONG cho comment cung dong voi duong dan -> moi comment mot dong rieng.
+
+# ---- BI MAT / DU LIEU THAT: khong bao gio dua len git ----
+# cookie dang nhap Facebook cua tung nick
+accounts/
+config.json
+config.json.bak
+config.json.tmp
+config.truoc_kich_ban.json
+soan_tin_cu.json
+# trang thai giao dien tren may nay
+giao_dien.json
+license.key
+*.pem
+
+# ---- du lieu chay / nhat ky ----
+log.txt
+log.txt.*
+logs/
+anh_loi/
+campaigns/
+nhat_ky*.txt
+
+# ---- sinh ra khi chay / dong goi ----
+__pycache__/
+*.pyc
+.pytest_cache/
+.venv/
+venv/
+
+# ---- may ca nhan ----
+.vscode/
+.claude/settings.local.json
+.claude/worktrees/
+Thumbs.db
+desktop.ini

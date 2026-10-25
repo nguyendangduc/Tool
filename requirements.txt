@@ -1,0 +1,4 @@
+playwright==1.64.0
+sv-ttk==2.6.1
+requests==2.34.2
+cryptography==50.0.2

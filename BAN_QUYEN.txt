@@ -1,0 +1,19 @@
+ĐIỀU KHOẢN SỬ DỤNG PHẦN MỀM
+BánhBaoChiên AutoTool
+
+1. Phần mềm này (gồm mã nguồn, giao diện, tài liệu hướng dẫn) thuộc quyền tác giả
+   của BánhBaoChiên AutoTool, được bảo hộ theo Luật Sở hữu trí tuệ Việt Nam.
+
+2. Người mua được cấp quyền SỬ DỤNG phần mềm cho công việc của chính mình,
+   trên máy tính của mình. Người mua KHÔNG được:
+   - Sao chép, chia sẻ, cho, tặng phần mềm cho người khác;
+   - Bán lại, cho thuê, hoặc dùng phần mềm để kinh doanh dịch vụ cho bên thứ ba;
+   - Chỉnh sửa, tách mã nguồn để làm phần mềm khác.
+
+3. Vi phạm các điều trên, tác giả có quyền chấm dứt hỗ trợ / cập nhật và
+   yêu cầu bồi thường theo quy định của pháp luật.
+
+4. Phần mềm được cung cấp "như hiện trạng". Người dùng tự chịu trách nhiệm
+   tuân thủ điều khoản sử dụng của Facebook và pháp luật khi sử dụng phần mềm.
+
+© 2026 BánhBaoChiên AutoTool. Bảo lưu mọi quyền.
