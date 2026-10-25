@@ -15,6 +15,8 @@
  5. PM duyệt + merge  test tay trên nick test → merge int/NNN vào main             ── CỔNG: chỉ PM merge
 ```
 
+**Cách chạy mặc định (PM chọn 25/10/2026 – tiết kiệm token):** Architect, Dev, Tester do **phiên Claude chính** làm (đã có sẵn bối cảnh, không đọc lại file lớn). **Chỉ Reviewer là agent riêng** (cặp mắt mới – giá trị lớn nhất của quy trình). Việc rủi ro cao (đụng đăng bài / nick) có thể thêm 1 Tester agent model rẻ để giữ "test mù". Không agent nào sửa file ngoài worktree của mình; Điều phối kiểm `git status` trên `main` sau mỗi lượt agent.
+
 Các vai: **PM** = bạn. **Điều phối** = phiên Claude chính (giao việc cho agent, gộp nhánh, cập nhật bảng tiến độ). **Architect / Dev / Tester / Reviewer** = agent trong `.claude/agents/`, mỗi agent bắt đầu trống, chỉ biết những gì ghi trong file vai + plan.
 
 ## 1. Lập kế hoạch – PM + Architect
