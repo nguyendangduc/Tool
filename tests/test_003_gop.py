@@ -139,7 +139,7 @@ def test_merge_plan_khong_sua_gi(data, tool_dir):
     plan = tool_store.merge_plan(data, "a5", ["a3", "a6"])
     assert data == before
     assert (tool_dir / "config.json").read_text(encoding="utf-8") == cfg_before
-    assert not list(tool_dir.glob("config.truoc_gop_*.json"))
+    assert not list(tool_dir.glob("**/config.truoc_gop_*.json"))
     assert not (tool_dir / "accounts" / "a3" / tool_store.MERGE_MARKER).exists()
     assert not list((tool_dir / "accounts" / "a5").rglob("ket_qua.json"))
     assert plan["ok"] is True and plan["errors"] == []
@@ -153,7 +153,7 @@ def test_merge_plan_noi_dung(data):
     assert actions == {("k1", "a3"): ("tach", THU_TINH), ("k2", "a6"): ("doi", SHOP),
                        ("k3", "a3"): ("bo_trung", THU_TINH)}
     assert sorted(plan["logout"]) == ["a3", "a6"]
-    assert plan["backup"].startswith("config.truoc_gop_") and plan["backup"].endswith(".json")
+    assert plan["backup"].startswith("sao_luu/config.truoc_gop_") and plan["backup"].endswith(".json")   # vong 2 (3.10g)
     assert plan["lines"] and all(isinstance(x, str) and x.strip() for x in plan["lines"])
     text = "\n".join(plan["lines"])
     assert "Thư Tình" in text and "Shop Mèo" in text
@@ -189,10 +189,11 @@ def test_merge_plan_tk_phu_khong_ten(data, tool_dir):
 
 
 def test_merge_plan_ten_ca_nhan_la_self(data, tool_dir):
-    """Tk phu dang nhap ten ca nhan cua main (2 tai khoan tool cung la Ca nhan) -> mapping 'self'."""
+    """Vong 2 (3.10b): tk phu ghep ra Ca nhan cua main (2 tai khoan tool cung la Ca nhan) -> LOI, khong gop im lang."""
     profile(tool_dir, "a6", "trần thị năm", "222")
     plan = tool_store.merge_plan(data, "a5", ["a6"])
-    assert plan["ok"] is True and plan["mapping"] == {"a6": "self"}
+    assert plan["ok"] is False and plan["mapping"] == {}
+    assert any("đang là Cá nhân của nick" in e for e in plan["errors"])
 
 
 @pytest.mark.parametrize("main, others", [("a99", ["a3"]), ("a5", ["a99"])])
@@ -222,7 +223,7 @@ def test_merge_accounts_day_du(data, tool_dir):
     assert out.get("done") is True and out["ok"] is True
 
     # (1) backup = config.json truoc khi gop
-    backup = tool_dir / f"config.truoc_gop_{STAMP}.json"
+    backup = tool_dir / "sao_luu" / f"config.truoc_gop_{STAMP}.json"
     assert backup.exists() and backup.read_text(encoding="utf-8") == cfg_before
 
     # (2) du lieu chep sang thu muc danh tinh; Ca nhan a5 giu nguyen
@@ -302,7 +303,7 @@ def test_merge_accounts_plan_loi_khong_lam_gi(data, tool_dir):
     except ValueError:
         pass
     assert data == before
-    assert not (tool_dir / f"config.truoc_gop_{STAMP}.json").exists()
+    assert not (tool_dir / "sao_luu" / f"config.truoc_gop_{STAMP}.json").exists()
     assert not (tool_dir / "accounts" / "a2" / tool_store.MERGE_MARKER).exists()
 
 
@@ -320,7 +321,7 @@ def test_merge_accounts_chep_loi_raise_oserror(data, tool_dir):
     with pytest.raises(OSError):
         tool_store.merge_accounts(data, "a5", ["a3"], STAMP, plan=plan)
     assert (tool_dir / "config.json").read_text(encoding="utf-8") == cfg_before   # config chua luu
-    assert (tool_dir / f"config.truoc_gop_{STAMP}.json").exists()                  # backup con
+    assert (tool_dir / "sao_luu" / f"config.truoc_gop_{STAMP}.json").exists()                  # backup con
 
 
 def test_merge_accounts_tam_nghi_lau_hon(data, tool_dir):

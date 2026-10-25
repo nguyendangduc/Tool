@@ -40,3 +40,16 @@ def test_loi_chuyen_danh_tinh_co_dong_nhat_ky():
     error = fb_login.IdentitySwitchFailed("61595395697904", "HTX chó mèo", "khong thay nut", "x_danh_tinh.png")
     assert error.note_text.startswith("⛔ Không chuyển được sang \"HTX chó mèo\"")
     assert error.note_text.endswith("(ảnh: anh_loi/x_danh_tinh.png)")
+
+
+def test_khung_vong_2():
+    """Vong 2 (plan 003 muc 3.10): loi danh tinh bi doi giua luot + dong nhat ky moi + ham dung chung."""
+    error = fb_login.IdentityChanged("61595395697904", "HTX chó mèo", "i_user khong khop")
+    assert isinstance(error, fb_login.IdentitySwitchFailed)
+    assert error.note_text.startswith("⛔ Danh tính đang dùng bị đổi giữa chừng (cần \"HTX chó mèo\")")
+    for key in ("legacy", "changed", "legacy_read", "join_as_missing", "ok", "fail", "missing", "page_join"):
+        assert key in fb_login.IDENTITY_NOTES
+    assert fb_login.PROFILE_PAGE_ID_KEY == "page_id"
+    for name in ("legacy_page_id", "self_name_of", "begin_identity", "end_identity", "assert_identity",
+                 "nick_join_usage"):
+        assert callable(getattr(fb_login, name))

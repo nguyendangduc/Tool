@@ -4004,7 +4004,7 @@ class TreeConfigApp:
         k = self.kind(item).RESULT_KIND
         if not k:
             return -1
-        rows = result_rows(self.account_dir(account), self.item_groups(account, item), k)
+        rows = result_rows(self.item_dir(account, item), self.item_groups(account, item), k)
         if k == "comments":
             notes, cstats = self.store.pause_notes(account, item), self.comment_stats(account, item)
             levels = [self.group_report(r, notes, cstats, k)[0] for r in rows]
@@ -4018,7 +4018,7 @@ class TreeConfigApp:
     def results_summary(self, parent, account, item):
         """1 dong tom tat duoi o danh sach nhom."""
         k = self.kind(item).RESULT_KIND
-        rows = result_rows(self.account_dir(account), self.item_groups(account, item), k)
+        rows = result_rows(self.item_dir(account, item), self.item_groups(account, item), k)
         total = lambda tab: sum((r["info"].get(tab) or {}).get(k, 0) for r in rows)
         if not any(r["info"] for r in rows) and not any(r["sent7"] for r in rows):
             return
@@ -4232,7 +4232,7 @@ class TreeConfigApp:
             else:
                 banner.pack_forget()
             table.clear()
-            rows = result_rows(acc_dir, self.item_groups(account, item), k)
+            rows = result_rows(self.item_dir(account, item), self.item_groups(account, item), k)
             # Xau truoc (do, vang), roi tot (xanh), cuoi cung la nhom chua co gi (trang)
             order = {3: 0, 2: 1, 0: 2, 1: 3}
             cstats = self.comment_stats(account, item) if k == "comments" else None
@@ -4708,9 +4708,9 @@ class TreeConfigApp:
         # ---- bang
         def fill():
             import fb_login
-            names = {slug: g.get("name") for slug, g in fb_login.load_results(self.account_dir(account))["groups"].items()
+            names = {slug: g.get("name") for slug, g in fb_login.load_results(self.item_dir(account, item))["groups"].items()
                      if g.get("name")}   # ma nhom (tu link bai) -> ten nhom
-            care = self.care_state(account)
+            care = self.care_state(account, item)
             table.clear()
             if care_var.get():
                 fill_approved(names, care)
@@ -4776,7 +4776,7 @@ class TreeConfigApp:
             if st.get("note") and not rows:
                 stats.configure(text=st["note"])
             elif care_var.get():
-                care = self.care_state(account)
+                care = self.care_state(account, item)
                 state = [care.get(fb_login_post_id(p["url"]), {}).get("status", "") for p in rows]
                 done = sum(s in ("sent", "visible") for s in state)   # cung cach dem voi o 'bai da cham' o tren
                 wait = sum(s in ("queued", "sending") for s in state)
@@ -4893,7 +4893,7 @@ class TreeConfigApp:
 
         def verify_care():
             """Sau 'Cap nhat ngay': mo lai cac bai 'da binh luan' xem binh luan da hien chua."""
-            care = self.care_state(account)
+            care = self.care_state(account, item)
             urls = [p["url"] for p in self.approved_posts(account, item)
                     if care.get(fb_login_post_id(p["url"]), {}).get("status") == "sent"]
             if not urls or not self.account_usable(account):
