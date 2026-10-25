@@ -1701,8 +1701,13 @@ def check_results_cli(acc_dir, slugs, open_ctx, note=print, identity=None):
 
     Moi buoc ghi vao kiem_tra_tien_do.json de giao dien hien 'dang lam gi'. open_ctx() -> BrowserContext.
     identity (task 003): None | {"id", "name"} - khac Ca nhan -> ensure_identity truoc khi doc, ket qua ghi vao
-    identity_dir(acc_dir, id), back_to_self trong finally; progress van ghi o acc_dir. (Khung: chua dung.)
+    identity_dir(acc_dir, id), back_to_self trong finally; progress van ghi o acc_dir.
+    Ra: True; False neu khong chuyen duoc danh tinh (da ghi nhat ky, KHONG doc ket qua, khong raise).
     """
+    import account_status
+    ident = _norm_identity((identity or {}).get("id"))
+    ident_name = (identity or {}).get("name") or ""
+    data_dir = identity_dir(acc_dir, ident)
     n = len(slugs)
     write_progress(acc_dir, "start", "Đang chuẩn bị…", 0, n)
     try:
@@ -1713,9 +1718,24 @@ def check_results_cli(acc_dir, slugs, open_ctx, note=print, identity=None):
                 raise ProfileBusy("Tai khoan ban qua 25 phut.")
         write_progress(acc_dir, "login", "Đang mở Facebook (chạy ngầm) và kiểm tra đăng nhập…", 0, n)
         context = open_ctx()
+        page, self_name = None, ""
         try:
             page = get_page(context)
             verify_and_record(page, acc_dir)
+            self_name = account_status.read_profile(acc_dir).get("name", "")
+            # Goi ca khi la Ca nhan: luot truoc bi ngat co the de Chrome o Page (khong co i_user -> khong bam gi).
+            if ident != IDENTITY_SELF:
+                write_progress(acc_dir, "identity", f"Đang chuyển sang {ident_name or ident}…", 0, n)
+            try:
+                ensure_identity(page, ident, ident_name if ident != IDENTITY_SELF else self_name,
+                                shot_dir=Path(__file__).resolve().parent / "anh_loi")
+            except IdentitySwitchFailed as error:
+                note(error.note_text)
+                write_progress(acc_dir, "done", f"Không chuyển được sang \"{error.name}\" → không đọc kết quả.",
+                               0, n, done=True, ok=False)
+                return False
+            if ident != IDENTITY_SELF:
+                note(IDENTITY_NOTES["ok"].format(name=ident_name or ident))
 
             def progress(i, total, name):
                 if i < total:
@@ -1723,8 +1743,10 @@ def check_results_cli(acc_dir, slugs, open_ctx, note=print, identity=None):
                 else:
                     write_progress(acc_dir, "notify", "Đang đọc thông báo Facebook (bài được duyệt / bị gỡ)…",
                                    total, total)
-            read_ok, no_access = check_results(page, acc_dir, slugs, note=note, progress=progress)
+            read_ok, no_access = check_results(page, data_dir, slugs, note=note, progress=progress)
         finally:
+            if page is not None and not back_to_self(page, self_name):
+                note(IDENTITY_NOTES["back_fail"])
             context.close()
         from datetime import datetime
         if read_ok == n:
@@ -1736,6 +1758,7 @@ def check_results_cli(acc_dir, slugs, open_ctx, note=print, identity=None):
                          + ", ".join(no_access[:3]) + ("…" if len(no_access) > 3 else ""))
         # 0 nhom doc duoc -> bao loi (tranh tuong da cap nhat); doc duoc 1 phan van tinh la xong.
         write_progress(acc_dir, "done", text, n, n, done=True, ok=read_ok > 0 or n == 0)
+        return True
     except ProfileBusy:
         write_progress(acc_dir, "done", "Tài khoản bận quá 25 phút (tool khác đang dùng) → thử lại sau.", 0, n,
                        done=True, ok=False)
@@ -2309,7 +2332,212 @@ def identity_dir(acc_dir, identity_id):
     Loi: ValueError neu identity_id khong phai "self" va khong phai toan chu so (chan duong dan la).
     Ghi chu: progress (kiem_tra_tien_do.json), khoa, tam nghi, status, fb_profile van dung acc_dir.
     """
-    raise NotImplementedError
+    ident = _norm_identity(identity_id)
+    if ident == IDENTITY_SELF:
+        return Path(acc_dir)
+    if not re.fullmatch(r"\d+", ident):
+        raise ValueError(f"Id danh tinh khong hop le: {ident!r}")
+    path = Path(acc_dir) / IDENTITY_DIR_NAME / ident
+    try:
+        path.mkdir(parents=True, exist_ok=True)
+    except OSError:
+        pass
+    return path
+
+
+def _norm_identity(identity_id):
+    """None / "" / "self" -> "self"; con lai -> chuoi (bo khoang trang)."""
+    ident = str(identity_id).strip() if identity_id is not None else ""
+    return ident or IDENTITY_SELF
+
+
+# Hop menu tai khoan: luon co 1 hop Messenger an -> bo qua (plan 003 muc 3b).
+_ACCOUNT_MENU_DIALOG = "div[role='dialog']:not([aria-label='Messenger']):visible"
+_SWITCH_PREFIX = r"(?:Chuyển sang|Switch to)"
+_SEE_ALL_RE = re.compile(r"^\s*(Xem tất cả trang cá nhân|See all profiles)\s*$", re.IGNORECASE)
+_CHOOSER_RE = re.compile(r"Chọn trang cá nhân|Select profile", re.IGNORECASE)
+# Nut trong hop 'Chon trang ca nhan': "<ten>, N thông báo" / "<ten>, đang chọn" -> bo phan duoi de lay ten.
+_CHOOSER_SUFFIX_RE = re.compile(r"(,\s*(\d+\+?\s*(thông báo|notifications?)|đang chọn|selected))+\s*$",
+                                re.IGNORECASE)
+_SELECTED_RE = re.compile(r",\s*(đang chọn|selected)\b", re.IGNORECASE)
+_SWITCH_STATE = {"reason": ""}   # ly do lan chuyen danh tinh gan nhat that bai (khong dau, de in log)
+
+
+def _nfc(text):
+    import unicodedata
+    return " ".join(unicodedata.normalize("NFC", text or "").split())
+
+
+def _account_menu_button(page):
+    """Nut mo menu tai khoan dang hien (nhan moi truoc, nhan cu du phong); None neu khong thay."""
+    for kind in ("[role='button']", ""):
+        for scope in ("div[role='banner'] ", ""):
+            for label in ACCOUNT_MENU_LABELS:
+                loc = page.locator(f"{scope}{kind}[aria-label=\"{label}\"]")
+                try:
+                    for i in range(min(loc.count(), 5)):
+                        if loc.nth(i).is_visible():
+                            return loc.nth(i)
+                except Exception:
+                    continue
+    return None
+
+
+def _open_account_menu(page):
+    """Bam nut tai khoan (goc tren phai) -> hop menu dang hien; khong mo duoc -> None. Khong raise."""
+    for attempt in range(2):
+        try:
+            if attempt:
+                # Trang hien tai khong co thanh tren cung (vd dang tai lai) -> ve trang chu thu lai 1 lan.
+                page.goto(FACEBOOK_URL, wait_until="domcontentloaded", timeout=45_000)
+                page.wait_for_timeout(2_000)
+            button = _account_menu_button(page)
+            if button is None:
+                page.wait_for_timeout(2_000)
+                button = _account_menu_button(page)
+            if button is None:
+                continue
+            _close_menu(page)   # menu con mo tu lan truoc -> bam nut se dong menu lai
+            button.click(timeout=5_000)
+            menu = page.locator(_ACCOUNT_MENU_DIALOG).last
+            menu.wait_for(state="visible", timeout=5_000)
+            page.wait_for_timeout(1_000)
+            return menu
+        except Exception as error:
+            print(f"[DANH TINH] Chua mo duoc menu tai khoan: {str(error).splitlines()[0][:80]}")
+    return None
+
+
+def _close_menu(page):
+    """Dong menu tai khoan + hop 'Chọn trang cá nhân' (neu dang mo)."""
+    try:
+        for _ in range(2):
+            if page.locator(_ACCOUNT_MENU_DIALOG).count() == 0:
+                break
+            page.keyboard.press("Escape")
+            page.wait_for_timeout(300)
+    except Exception:
+        pass
+
+
+def _button_label(button):
+    """Ten nut: aria-label, khong co thi chu trong nut (cac dong noi bang ', ')."""
+    label = button.get_attribute("aria-label", timeout=2_000) or ""
+    if not label.strip():
+        label = ", ".join(x.strip() for x in (button.inner_text(timeout=2_000) or "").splitlines() if x.strip())
+    return _nfc(label)
+
+
+def _menu_switch_buttons(menu):
+    """[(ten, nut)] cac nut 'Chuyển sang <ten>' trong menu tai khoan."""
+    out = []
+    pattern = re.compile(rf"^{_SWITCH_PREFIX}\s+(.+)$", re.IGNORECASE)
+    try:
+        buttons = menu.get_by_role("button", name=re.compile(rf"^\s*{_SWITCH_PREFIX}\s", re.IGNORECASE))
+        for i in range(min(buttons.count(), 20)):
+            m = pattern.match(_button_label(buttons.nth(i)))
+            if m and m.group(1).strip():
+                out.append((m.group(1).strip(), buttons.nth(i)))
+    except Exception:
+        pass
+    return out
+
+
+def _open_chooser(page, menu):
+    """Bam 'Xem tất cả trang cá nhân' trong menu -> hop 'Chọn trang cá nhân'; khong co -> None."""
+    try:
+        see_all = menu.get_by_role("button", name=_SEE_ALL_RE)
+        if see_all.count() == 0:
+            see_all = menu.get_by_text(_SEE_ALL_RE)
+        if see_all.count() == 0:
+            return None
+        see_all.first.click(timeout=5_000)
+        chooser = page.locator(_ACCOUNT_MENU_DIALOG).filter(has_text=_CHOOSER_RE).or_(
+            page.locator("div[role='dialog'][aria-label='Chọn trang cá nhân']:visible, "
+                         "div[role='dialog'][aria-label='Select profile']:visible")).last
+        chooser.wait_for(state="visible", timeout=8_000)
+        page.wait_for_timeout(1_000)
+        return chooser
+    except Exception as error:
+        print(f"[DANH TINH] Khong mo duoc hop chon trang ca nhan: {str(error).splitlines()[0][:80]}")
+        return None
+
+
+def _chooser_entries(chooser):
+    """[(ten, nut, dang_chon)] cac danh tinh trong hop 'Chọn trang cá nhân'."""
+    out = []
+    try:
+        buttons = chooser.get_by_role("button")
+        for i in range(min(buttons.count(), 40)):
+            label = _button_label(buttons.nth(i))
+            if not _CHOOSER_SUFFIX_RE.search(label):
+                continue   # nut Dong / Tao trang ... khong phai danh tinh
+            name = _CHOOSER_SUFFIX_RE.sub("", label).strip()
+            if name:
+                out.append((name, buttons.nth(i), bool(_SELECTED_RE.search(label))))
+    except Exception:
+        pass
+    return out
+
+
+def _click_switch(page, name, any_name=False):
+    """Mo menu, bam nut chuyen sang danh tinh ten `name` ('Chuyển sang <name>', khong co thi tim trong hop
+    'Chọn trang cá nhân'). any_name=True + name rong: bam nut 'Chuyển sang ...' dau tien (ve Ca nhan khi chua
+    biet ten). -> True neu da bam. Khong raise."""
+    menu = _open_account_menu(page)
+    if menu is None:
+        _SWITCH_STATE["reason"] = "khong mo duoc menu tai khoan"
+        return False
+    want = _nfc(name).casefold()
+    buttons = _menu_switch_buttons(menu)
+    pick = next((b for n, b in buttons if want and n.casefold() == want), None)
+    if pick is None and any_name and not want and buttons:
+        pick = buttons[0][1]
+    if pick is None and want:
+        chooser = _open_chooser(page, menu)
+        if chooser is not None:
+            pick = next((b for n, b, _sel in _chooser_entries(chooser) if n.casefold() == want), None)
+    if pick is None:
+        _SWITCH_STATE["reason"] = "khong thay nut chuyen sang danh tinh nay trong menu tai khoan"
+        _close_menu(page)
+        return False
+    try:
+        pick.click(timeout=5_000)
+        return True
+    except Exception as error:
+        _SWITCH_STATE["reason"] = f"khong bam duoc nut chuyen ({str(error).splitlines()[0][:60]})"
+        _close_menu(page)
+        return False
+
+
+def _wait_identity(page, ok):
+    """Sau khi bam chuyen: cho IDENTITY_SWITCH_WAIT giay roi doc cookie toi da IDENTITY_SWITCH_TIMEOUT giay.
+    -> danh tinh hien tai neu ok(danh_tinh) dung, khong thi None."""
+    try:
+        page.wait_for_timeout(IDENTITY_SWITCH_WAIT * 1000)
+    except Exception:
+        time.sleep(IDENTITY_SWITCH_WAIT)
+    deadline = time.time() + IDENTITY_SWITCH_TIMEOUT
+    while True:
+        now_id = current_identity(page)
+        if ok(now_id):
+            return now_id
+        if time.time() >= deadline:
+            return None
+        try:
+            page.wait_for_timeout(1_000)
+        except Exception:
+            time.sleep(1)
+
+
+def _raise_if_rate_limited(page):
+    """Hop thoai / canh bao dang hien bao Facebook gioi han -> RuntimeError co chu 'rate_limited'."""
+    try:
+        texts = page.locator("div[role='dialog']:visible, div[role='alert']:visible").all_inner_texts()
+    except Exception:
+        return
+    if is_rate_limited(" | ".join(texts)):
+        raise RuntimeError("rate_limited: Facebook bao gioi han khi doc danh sach Page")
 
 
 def current_identity(page):
@@ -2319,7 +2547,13 @@ def current_identity(page):
     Ra: gia tri cookie i_user (id Page, chuoi so) neu co; khong co i_user -> "self".
     Loi: khong raise (doc cookie loi -> "self"). Khong in gia tri cookie nao khac ra log.
     """
-    raise NotImplementedError
+    try:
+        for c in page.context.cookies(FACEBOOK_URL):
+            if c.get("name") == "i_user" and re.fullmatch(r"\d+", c.get("value") or ""):
+                return c["value"]
+    except Exception:
+        pass
+    return IDENTITY_SELF
 
 
 def read_identities(page):
@@ -2333,7 +2567,51 @@ def read_identities(page):
     Loi: khong mo duoc menu / khong doc duoc ten ca nhan -> RuntimeError. Facebook bao gioi han -> RuntimeError
          co chu "rate_limited" (nguoi goi pause_nick).
     """
-    raise NotImplementedError
+    self_name, pages = "", []
+    try:
+        if current_identity(page) != IDENTITY_SELF and not back_to_self(page):
+            raise RuntimeError("Dang o Page, khong chuyen ve Ca nhan duoc de doc danh sach")
+        _raise_if_rate_limited(page)
+        menu = _open_account_menu(page)
+        if menu is None:
+            raise RuntimeError("Khong mo duoc menu tai khoan")
+        # Dong dau menu = ten danh tinh dang dung (dang o Ca nhan -> ten ca nhan).
+        try:
+            lines = [_nfc(x) for x in (menu.inner_text(timeout=3_000) or "").splitlines() if x.strip()]
+        except Exception:
+            lines = []
+        self_name = lines[0] if lines and not re.match(rf"^{_SWITCH_PREFIX}\b", lines[0], re.IGNORECASE) else ""
+        if not self_name:
+            _close_menu(page)
+            raise RuntimeError("Khong doc duoc ten Ca nhan trong menu tai khoan")
+        names = [n for n, _b in _menu_switch_buttons(menu)]
+        chooser = _open_chooser(page, menu)   # >= 2 Page: menu chi hien vai nut -> hop 'Chọn trang cá nhân' du
+        if chooser is not None:
+            names += [n for n, _b, selected in _chooser_entries(chooser) if not selected]
+        _close_menu(page)
+        seen, todo = {self_name.casefold()}, []
+        for n in names:
+            if n.casefold() not in seen:
+                seen.add(n.casefold())
+                todo.append(n)
+        if len(todo) > READ_IDENTITIES_MAX:
+            print(f"[DANH TINH] Co {len(todo)} Page -> chi doc {READ_IDENTITIES_MAX} Page dau.")
+            todo = todo[:READ_IDENTITIES_MAX]
+        print(f"[DANH TINH] Ca nhan + {len(todo)} Page -> chuyen lan luot de doc id (~{IDENTITY_SWITCH_WAIT}s/Page).")
+        for name in todo:
+            before = current_identity(page)
+            pid = None
+            if _click_switch(page, name):
+                pid = _wait_identity(page, lambda x, b=before: x not in (b, IDENTITY_SELF))
+            _raise_if_rate_limited(page)
+            if pid and all(p["id"] != pid for p in pages):
+                pages.append({"id": pid, "name": name, "kind": "page"})
+            else:
+                print(f"[DANH TINH] Khong doc duoc id cua Page '{name}' ({_SWITCH_STATE['reason'] or 'cookie khong doi'})"
+                      " -> bo qua Page nay.")
+    finally:
+        back_to_self(page, self_name)
+    return [{"id": IDENTITY_SELF, "name": self_name, "kind": "self"}] + pages
 
 
 def switch_identity(page, identity_id, name):
@@ -2347,7 +2625,22 @@ def switch_identity(page, identity_id, name):
     Ra: True neu sau cung current_identity(page) == identity_id; False neu khong.
     Loi: khong raise (moi loi Playwright -> False).
     """
-    raise NotImplementedError
+    target = _norm_identity(identity_id)
+    _SWITCH_STATE["reason"] = ""
+    try:
+        if current_identity(page) == target:
+            return True
+        print(f"[DANH TINH] Chuyen sang: {name or target}")
+        if not _click_switch(page, name, any_name=target == IDENTITY_SELF):
+            return False
+        if _wait_identity(page, lambda x: x == target) is None:
+            _SWITCH_STATE["reason"] = (f"da bam chuyen nhung sau {IDENTITY_SWITCH_WAIT + IDENTITY_SWITCH_TIMEOUT} giay "
+                                       "Facebook van o danh tinh khac")
+            return False
+        return True
+    except Exception as error:
+        _SWITCH_STATE["reason"] = f"loi khi chuyen ({str(error).splitlines()[0][:60]})"
+        return False
 
 
 def ensure_identity(page, identity_id, name, shot_dir=None):
@@ -2359,7 +2652,22 @@ def ensure_identity(page, identity_id, name, shot_dir=None):
          <yyyymmdd_HHMMSS>_danh_tinh.png vao shot_dir truoc khi raise. Nguoi goi: ghi error.note_text,
          KHONG dang / binh luan, bo luot (ma thoat 0), back_to_self trong finally.
     """
-    raise NotImplementedError
+    target = _norm_identity(identity_id)
+    if switch_identity(page, target, name):
+        return
+    reason = _SWITCH_STATE["reason"] or "khong ro ly do"
+    print(f"[DANH TINH] Khong chuyen duoc sang '{name or target}': {reason}")
+    shot = ""
+    if shot_dir:
+        try:
+            Path(shot_dir).mkdir(parents=True, exist_ok=True)
+            file = f"{time.strftime('%Y%m%d_%H%M%S')}_danh_tinh.png"
+            page.screenshot(path=str(Path(shot_dir) / file), timeout=10_000)
+            shot = file
+            print(f"[ANH LOI] {Path(shot_dir) / file}")
+        except Exception as error:
+            print(f"[ANH LOI] Khong chup duoc: {str(error).splitlines()[0][:80]}")
+    raise IdentitySwitchFailed(target, name or ("Cá nhân" if target == IDENTITY_SELF else target), reason, shot)
 
 
 def back_to_self(page, self_name=""):
@@ -2371,7 +2679,17 @@ def back_to_self(page, self_name=""):
         (nguoi goi ghi IDENTITY_NOTES["back_fail"]; luot sau ensure_identity tu sua).
     Loi: KHONG BAO GIO raise (dung trong finally).
     """
-    raise NotImplementedError
+    try:
+        if current_identity(page) == IDENTITY_SELF:
+            return True
+        if switch_identity(page, IDENTITY_SELF, self_name):
+            return True
+        if self_name:
+            # Ten luu cu / da doi ten -> thu nut 'Chuyển sang ...' dau tien (kiem lai bang cookie).
+            return switch_identity(page, IDENTITY_SELF, "")
+        return False
+    except Exception:
+        return False
 
 
 def load_identities_file(acc_dir):
@@ -2379,27 +2697,46 @@ def load_identities_file(acc_dir):
 
     Ra: {"time": epoch (0 neu chua doc), "identities": [... nhu read_identities ...]}. Loi doc file -> mac dinh.
     """
-    raise NotImplementedError
+    try:
+        st = json.loads((Path(acc_dir) / IDENTITIES_FILE).read_text(encoding="utf-8"))
+        if isinstance(st, dict) and isinstance(st.get("identities"), list):
+            return {"time": st.get("time") or 0, "identities": st["identities"]}
+    except Exception:
+        pass
+    return {"time": 0, "identities": []}
 
 
 def save_identities_file(acc_dir, identities):
     """Ghi accounts/<id>/danh_tinh.json = {"time": now, "identities": identities}. Loi ghi -> bo qua."""
-    raise NotImplementedError
+    try:
+        path = Path(acc_dir) / IDENTITIES_FILE
+        tmp = path.with_suffix(".json.tmp")
+        tmp.write_text(json.dumps({"time": time.time(), "identities": list(identities)}, ensure_ascii=False,
+                                  indent=1), encoding="utf-8")
+        tmp.replace(path)
+    except (OSError, TypeError, ValueError):
+        pass
 
 
 # ------------------------------------------------------------------ trang thai + dang xuat
 def fetch_profile_name(page, base_dir):
     """Lay ten Facebook dang dung (mo facebook.com/me, doc tieu de trang) -> luu de giao dien hien.
 
-    Dang dung duoi danh nghia Page -> la ten Page. Loi thi bo qua (khong anh huong dang nhap).
+    Task 003: Chrome dang o Page (cookie i_user) -> back_to_self truoc khi doc -> ten luu LUON la ten Ca nhan
+    (ve Ca nhan khong duoc -> khong ghi gi lan nay). Loi thi bo qua (khong anh huong dang nhap).
     """
     import account_status
     try:
         uid = next((c["value"] for c in page.context.cookies(FACEBOOK_URL) if c["name"] == "c_user"), "")
+        if current_identity(page) != IDENTITY_SELF and \
+                not back_to_self(page, account_status.read_profile(base_dir).get("name", "")):
+            print("[LOGIN] Chrome dang o Page, chua ve Ca nhan duoc -> chua doc ten tai khoan lan nay.")
+            return
         page.goto("https://www.facebook.com/me", wait_until="domcontentloaded", timeout=30_000)
         # Ten nam o nhan anh dai dien dau trang ca nhan (ca nick lan Page); tieu de trang chi la du phong.
         generic = {"trang cá nhân của bạn", "your profile", "hành động với ảnh đại diện",
                    "profile picture actions", "ảnh đại diện", "profile picture", "facebook"}
+        generic |= {x.lower() for x in ACCOUNT_MENU_LABELS}
         name = ""
         for _ in range(8):
             page.wait_for_timeout(1_000)
@@ -2412,14 +2749,12 @@ def fetch_profile_name(page, base_dir):
             # Page chua co anh dai dien: nhan anh khong co ten -> doc menu tai khoan (goc tren phai),
             # dong dau tien la ten tai khoan / Page dang dung.
             try:
-                page.locator("[aria-label='Trang cá nhân của bạn'], [aria-label='Your profile']").first.click(timeout=5_000)
-                menu = page.locator("div[role='dialog']").last
-                menu.wait_for(state="visible", timeout=5_000)
-                page.wait_for_timeout(1_000)
-                lines = [x.strip() for x in menu.inner_text(timeout=3_000).splitlines() if x.strip()]
-                if lines and lines[0].lower() not in generic:
-                    name = lines[0]
-                page.keyboard.press("Escape")
+                menu = _open_account_menu(page)   # nut 'Account, your profile' (nhan cu du phong), bo hop Messenger
+                if menu is not None:
+                    lines = [x.strip() for x in menu.inner_text(timeout=3_000).splitlines() if x.strip()]
+                    if lines and lines[0].lower() not in generic:
+                        name = lines[0]
+                    _close_menu(page)
             except Exception:
                 pass
         if not name:
@@ -2460,13 +2795,11 @@ def _logout_on_facebook(page):
     page.goto(FACEBOOK_URL, wait_until="domcontentloaded", timeout=30_000)
     if not _has_login_cookie(page.context):
         return True
-    menus = [
-        "div[role='button'][aria-label='Trang cá nhân của bạn']",
-        "div[role='button'][aria-label='Your profile']",
-        "[aria-label='Trang cá nhân của bạn']",
-        "[aria-label='Your profile']",
-        "div[role='banner'] div[role='button'] image",
-    ]
+    # Nut menu tai khoan: nhan moi 'Account, your profile' truoc, nhan cu du phong (plan 003 muc 3b).
+    menus = ([f"div[role='banner'] [role='button'][aria-label=\"{x}\"]" for x in ACCOUNT_MENU_LABELS]
+             + [f"[role='button'][aria-label=\"{x}\"]" for x in ACCOUNT_MENU_LABELS]
+             + [f"[aria-label=\"{x}\"]" for x in ACCOUNT_MENU_LABELS]
+             + ["div[role='banner'] div[role='button'] image"])
     try:
         page.locator(", ".join(menus)).first.wait_for(timeout=8_000)
     except Exception:
@@ -2479,11 +2812,14 @@ def _logout_on_facebook(page):
             if menu.count() == 0:
                 continue
             menu.click(timeout=3_000)
-            item = page.get_by_role("button", name=re.compile(r"^(Đăng xuất|Log out)$")).first
+            # Nut Dang xuat trong hop menu (bo hop Messenger an), khong thay thi tim ca trang nhu cu.
+            logout_re = re.compile(r"^(Đăng xuất|Log out)$")
+            item = page.locator(_ACCOUNT_MENU_DIALOG).get_by_role("button", name=logout_re).or_(
+                page.get_by_role("button", name=logout_re)).first
             try:
                 item.wait_for(timeout=3_000)
             except Exception:
-                item = page.get_by_text(re.compile(r"^(Đăng xuất|Log out)$")).first
+                item = page.get_by_text(logout_re).first
             item.click(timeout=3_000)
             for _ in range(20):
                 page.wait_for_timeout(500)
