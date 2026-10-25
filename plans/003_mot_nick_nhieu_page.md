@@ -194,6 +194,8 @@ Không vai nào sửa: `main.py`, `account_status.py`, `dong_goi.ps1` (task 001 
 
 Ghi chú: đăng bài, theo dõi, chăm bài, kiểm kết quả của cùng một tài khoản **dùng chung 1 thư mục Chrome** (`accounts/<mã>/browser_profile`, cả `fb_upstt.open_account_context` lẫn `fb_monitor_v4` đều gọi `fb_login.open_context(account_dir)`), và không bao giờ mở cùng lúc (khoá thư mục + `hold_nick`). Vì vậy mỗi lượt phải **tự chuyển đúng danh tính lúc bắt đầu** và **chuyển về Cá nhân lúc kết thúc** – lượt trước để Chrome ở Page nào thì lượt sau không được tin là vẫn ở đó.
 
+| 11 | (Dev A) Xác minh nhóm khi đang là Page (`verify_one`: xem lại nhóm chờ duyệt, `--joined-groups`): có tự trả lời câu hỏi tham gia + bấm "Vẫy tay chào" bằng Page không? | Chặn (theo câu 2) | **(a) Cho Page làm như Cá nhân** – PM 25/10: "page vẫn làm như trang cá nhân bình thường" |
+
 ## 8. Tiến độ (chỉ Điều phối ghi)
 | Thời gian | Bước | Vai | Nhánh / commit | Kết quả |
 |---|---|---|---|---|
