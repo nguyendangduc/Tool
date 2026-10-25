@@ -59,7 +59,7 @@ Vì sao: hiện mỗi Page là một tài khoản riêng trong tool (HUONG_DAN.m
 | # | Câu hỏi | Đề xuất | PM quyết |
 |---|---|---|---|
 | 1 | Cách chuyển: (A) chọn "Đăng với tư cách" trong hộp đăng của nhóm, hay (B) chuyển cả trang sang Page rồi chuyển về? | Cho thử trên nick test | **B** – chuyển cả trang sang Page (như người thật), xong việc chuyển về Cá nhân |
-| 2 | Page chưa vào nhóm thì: bỏ nhóm đó, hay tự xin vào bằng Page? | Bỏ + báo, xin vào làm sau | (chưa trả lời – tạm theo đề xuất) |
+| 2 | Page chưa vào nhóm thì: bỏ nhóm đó, hay tự xin vào bằng Page? | Bỏ + báo, xin vào làm sau | **Theo đề xuất**: bỏ nhóm đó + báo trong nhật ký, KHÔNG đăng bằng Cá nhân thay; xin vào bằng Page làm việc sau |
 | 3 | Gộp "Tai khoan 2", "tai khoan 1" → "Tài khoản 5" và "Tài khoản 3" → "Tài khoản 4" ngay khi cập nhật, hay để bạn bấm nút "Gộp"? | Bạn bấm nút, có hộp xác nhận | **Bấm nút**: tool chỉ hiện cảnh báo "N tài khoản chung 1 nick" + nút **Gộp vào …**; bấm → hộp xác nhận liệt kê việc sẽ làm (Page nào vào đâu, kịch bản đổi ra sao, có backup, Chrome nào bị đăng xuất + xoá) → bấm Gộp mới làm |
 | 4 | Theo dõi nhóm + bình luận khách: dùng danh tính nào? | Chọn được như đăng bài | **Như đăng bài**: kịch bản theo dõi chọn danh tính; là Page thì vừa mở Chrome là chuyển sang Page luôn rồi mới quét / bình luận |
 
