@@ -108,7 +108,14 @@ Các nút khác:
 
 ⚠️ **Giờ đăng của các nội dung trong cùng một tài khoản Facebook không được trùng hoặc quá sát nhau.** Cửa sổ sẽ báo nếu bị trùng, kèm số phút cần cách nhau. Lượt đăng bài và lượt quét của cùng tài khoản tự **xếp hàng**, không chạy chồng nhau.
 
-**Dùng Page:** chọn tài khoản → **Đăng nhập** → trong Chrome bấm ảnh đại diện → chọn Page → đóng Chrome. Muốn vừa dùng cá nhân vừa dùng Page thì tạo 2 tài khoản trong tool.
+**Dùng Page:** **1 nick Facebook = 1 tài khoản trong tool** (1 Chrome, đăng nhập 1 lần bằng **Cá nhân**). **Không** tạo thêm tài khoản riêng cho Page — Facebook sẽ thấy 1 người đăng nhập trên nhiều Chrome và dễ đá cả các phiên.
+
+1. **Đọc danh sách Page:** chọn tài khoản → tab **🎭 Cá nhân & Page** → bấm **🔄 Đọc danh sách Page**. Tool mở Facebook chạy ngầm (chỉ xem), đọc Cá nhân + các Page nick quản lý (tối đa 10 Page; nhiều Page có thể mất vài phút). Đổi tên Page / thêm Page trên Facebook thì bấm đọc lại — kịch bản vẫn giữ đúng Page. Page không còn thấy được giữ lại, ghi "⚠ không thấy".
+2. **Đăng bằng:** mở kịch bản (đăng bài hoặc theo dõi) → tab **👥 Tài khoản chạy** → bấm ô **Đăng bằng** của tài khoản → chọn **Cá nhân** hoặc 1 Page → **Lưu**. Mặc định là Cá nhân. Khi chạy, tool tự chuyển sang Page như người thật, làm xong **tự chuyển về Cá nhân**. Không chuyển được → lượt đó **không đăng / bình luận gì** (không đăng nhầm bằng Cá nhân). Kết quả, trạng thái nhóm, chăm bài của Page tách riêng với Cá nhân.
+   - Muốn cùng 1 nội dung đăng cả bằng Cá nhân lẫn Page: **⧉ Nhân bản** kịch bản, bản sao chọn Đăng bằng Page.
+   - Page chưa vào nhóm: tool bỏ nhóm đó và ghi nhật ký. **🙋 Xin vào / 🚪 Rời nhóm bằng Page chưa hỗ trợ** (nút tắt khi kịch bản chỉ có tài khoản đăng bằng Page) — vào nhóm bằng Page thì làm tay trên Facebook.
+   - Nút **Mở** (Chrome của tài khoản) luôn mở ở Cá nhân: muốn xem bằng Page thì bấm ảnh đại diện góc phải → **Chuyển sang <tên Page>**.
+3. **Gộp tài khoản cũ:** trước đây mỗi Page là 1 tài khoản riêng → tool hiện cảnh báo **"N tài khoản chung 1 nick"** (Tổng quan và trang tài khoản) + nút **Gộp vào …**. Bấm → chọn **tài khoản chính** (giữ Chrome, nên là tài khoản đăng nhập Cá nhân) → hộp xác nhận liệt kê: tài khoản nào thành Page nào, kịch bản đổi ra sao (kịch bản đang chạy cả tài khoản chính lẫn phụ thì tách thành bản sao "<tên> (<tên Page>)"), có sao lưu `config.truoc_gop_<ngày giờ>.json`, Chrome nào bị đăng xuất + xoá → bấm **Gộp**. Báo "Không thấy Page …" thì bấm **🔄 Đọc danh sách Page của tài khoản chính** trong hộp rồi gộp lại. Kết quả cũ được giữ. Đăng xuất Chrome phụ lỗi → Tổng quan hiện cảnh báo + nút **Thử lại**.
 
 ---
 
