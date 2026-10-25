@@ -2553,3 +2553,105 @@ def logout(playwright, base_dir, force=False):
     print("[LOGOUT] " + ("Da dang xuat tren Facebook va xoa du lieu dang nhap."
                          if on_facebook else "Da xoa du lieu dang nhap tren may."))
     return on_facebook
+
+
+# ------------------------------------------------------------------ danh tinh vong 2 (task 003, plan muc 3.10)
+# Khung (Architect): chu ky + docstring; than do Dev A viet. Dat cuoi file de khong dung khoi Dev A da sua.
+# Moi luot / lenh dung Chrome lam viec theo danh tinh goi: begin_identity() (dau luot) -> assert_identity()
+# truoc MOI bai dang / binh luan / xin vao / roi nhom -> end_identity() trong finally.
+PROFILE_PAGE_ID_KEY = "page_id"   # khoa them trong accounts/<id>/fb_profile.json: i_user luc ghi ten ("" = Ca nhan)
+IDENTITY_NOTES.update({
+    "legacy": "⚠️ {account}: Chrome đang ở Page \"{name}\" (tài khoản Page kiểu cũ) → vẫn chạy bằng Page này như "
+              "trước, không tự chuyển về Cá nhân. Nên Gộp tài khoản này vào tài khoản Cá nhân của nick (màn tài khoản "
+              "→ nút Gộp) để chỉ dùng 1 Chrome.",
+    "changed": "⛔ Danh tính đang dùng bị đổi giữa chừng (cần \"{name}\"): dừng lượt, không đăng / bình luận tiếp để "
+               "tránh dùng nhầm danh tính.",
+    "legacy_read": "Chrome của tài khoản này đang ở Page \"{name}\" (tài khoản Page kiểu cũ) → không đọc danh sách Page "
+                   "ở đây (đọc sẽ đổi danh tính đang đăng). Hãy Gộp tài khoản này vào tài khoản Cá nhân của nick rồi "
+                   "đọc danh sách Page ở tài khoản Cá nhân.",
+    "join_as_missing": "không thấy \"{name}\" trong hộp \"Tham gia với tư cách\" → không xin, để tránh xin nhầm danh tính",
+})
+
+
+class IdentityChanged(IdentitySwitchFailed):
+    """Truoc 1 bai dang / binh luan / xin vao / roi nhom: cookie i_user khong con dung danh tinh cua luot
+    (Facebook tu chuyen, nguoi dung bam tay trong Chrome...). Nguoi goi: ghi note_text, DUNG ca luot (khong lam
+    nhom / bai con lai), end_identity trong finally, ma thoat 0. La IdentitySwitchFailed -> cac cho da bat loi chuyen
+    danh tinh cung bat duoc; nhung PHAI goi assert_identity NGOAI cac khoi `except RuntimeError / Exception` nuot loi.
+    """
+
+    @property
+    def note_text(self):
+        return IDENTITY_NOTES["changed"].format(name=self.name or self.identity_id)
+
+
+def legacy_page_id(page, acc_dir):
+    """Tai khoan Page kieu cu? (plan 003 muc 3.10a) - CHI doc cookie + file, khong mo trang, khong bam gi.
+
+    Kieu cu = danh_tinh.json cua nick (load_identities_file(acc_dir)) KHONG co Page nao (chua tung bam 'Doc danh
+    sach Page') VA Chrome dang co cookie i_user (dang o 1 Page - kieu cu: moi Page 1 tai khoan tool, tu chuyen Chrome
+    sang Page bang tay).
+    Ra: id Page (i_user) neu la kieu cu; "" neu khong (dang o Ca nhan, hoac nick da co danh sach Page -> i_user la do
+        luot truoc bi ngat, begin_identity tu sua). Loi: khong raise (loi doc -> "").
+    """
+    raise NotImplementedError
+
+
+def self_name_of(acc_dir):
+    """Ten Ca nhan dung cho back_to_self / ensure_identity("self") - MOI script dung ham nay (khong tu doc file).
+
+    Thu tu: muc "self" trong danh_tinh.json (load_identities_file) > ten trong fb_profile.json NEU file do khong co
+    page_id (khong co thi do la ten Page kieu cu, khong dung) > "". Loi: khong raise -> "".
+    """
+    raise NotImplementedError
+
+
+def begin_identity(page, acc_dir, identity_id, name, tool_dir, account_name="", shot_dir=None):
+    """Buoc 2-3 cua luot (plan 003 muc 3.5 + 3.10), goi ngay SAU verify_and_record, ca khi la Ca nhan.
+
+    Vao: identity_id = post_as cua muc / --identity ("self" | id Page); name = post_as_name ("" voi Page = Page khong
+         con / missing); tool_dir = BASE_DIR (ghi note); account_name = ten tai khoan (cho dong nhat ky);
+         shot_dir None -> tool_dir / "anh_loi".
+    Lam (dung thu tu):
+      1. Page ma name == "" -> note IDENTITY_NOTES["missing"], tra None. KHONG thao tac Facebook (PM cau 13).
+      2. "self" va legacy_page_id(page, acc_dir) = P -> KHONG bam gi; note IDENTITY_NOTES["legacy"] (once=True;
+         name = ten trong fb_profile.json neu page_id == P, khong thi P). Tra run kieu cu (PM cau 12 = A1).
+      3. Con lai: ensure_identity(page, id, name hoac self_name_of(acc_dir), shot_dir). IdentitySwitchFailed -> note
+         error.note_text, tra None. Page -> note IDENTITY_NOTES["ok"].
+    Ra: None = bo luot (da ghi nhat ky). Hoac run = {"id": id danh tinh cho identity_dir / join_state ("self" voi kieu
+        cu - du lieu kieu cu o acc_dir nhu truoc), "expect": id phai thay o cookie truoc moi bai (kieu cu: P),
+        "name": ten danh tinh dang dung ("" = Ca nhan), "legacy": bool}.
+    Loi: khong raise (tru loi Playwright khong lien quan danh tinh - nguoi goi xu ly nhu cu).
+    """
+    raise NotImplementedError
+
+
+def end_identity(page, acc_dir, tool_dir):
+    """Buoc 5 (finally cua MOI luot, truoc context.close()). page None -> True.
+
+    Kieu cu (legacy_page_id(page, acc_dir) khac "") -> KHONG bam gi, tra True (khong bao gio tu ve Ca nhan - PM cau
+    12). Con lai -> back_to_self(page, self_name_of(acc_dir)); False -> note IDENTITY_NOTES["back_fail"].
+    Ra: True neu dang o danh tinh dung de dong Chrome. Loi: KHONG BAO GIO raise.
+    """
+    raise NotImplementedError
+
+
+def assert_identity(page, expect_id, name=""):
+    """Kiem cookie i_user truoc MOI bai dang / binh luan / xin vao / roi nhom (PM cau 14). CHI doc cookie.
+
+    Vao: expect_id = run["expect"] cua begin_identity ("self" | id Page); name = run["name"] (cho dong nhat ky).
+    Ra: None neu current_identity(page) == expect_id.
+    Loi: lech -> raise IdentityChanged(expect_id, name, "i_user khong khop"). Khong chup anh, khong bam gi.
+    """
+    raise NotImplementedError
+
+
+def nick_join_usage(acc_dir):
+    """Gioi han xin vao nhom tinh chung CA NICK (Ca nhan + moi Page - cau PM 7 doi).
+
+    Doc xin_vao_nhom.json o acc_dir va moi acc_dir/danh_tinh/<id so>/ (khong tao thu muc).
+    Ra: {"today": so lan da BAM xin vao hom nay (cong moi danh tinh, nhu joins_today), "last": epoch lan bam xin gan
+        nhat (0 neu chua)}. Nguoi goi: today >= per_day -> dung; truoc lan bam dau tien cho them
+        JOIN_WAIT_SECONDS - (now - last) neu > 0. Loi doc file -> bo qua file do, khong raise.
+    """
+    raise NotImplementedError
