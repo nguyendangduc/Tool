@@ -15,7 +15,31 @@
  5. PM duyệt + merge  test tay trên nick test → merge int/NNN vào main             ── CỔNG: chỉ PM merge
 ```
 
-**Cách chạy mặc định (PM chọn 25/10/2026 – tiết kiệm token):** Architect, Dev, Tester do **phiên Claude chính** làm (đã có sẵn bối cảnh, không đọc lại file lớn). **Chỉ Reviewer là agent riêng** (cặp mắt mới – giá trị lớn nhất của quy trình). Việc rủi ro cao (đụng đăng bài / nick) có thể thêm 1 Tester agent model rẻ để giữ "test mù". Không agent nào sửa file ngoài worktree của mình; Điều phối kiểm `git status` trên `main` sau mỗi lượt agent.
+## Chọn cách chạy (PM chốt 26/10/2026)
+Mỗi task chọn 1 trong 3 cách. **Điều phối đề xuất trong plan (mục "Cách chạy"), PM chốt cùng lúc chốt plan.**
+
+| | **Cách 1 – Đội đầy đủ** | **Cách 2 – Dev chính + Tester + Reviewer** | **Cách 3 – Dev chính + Reviewer** |
+|---|---|---|---|
+| Architect | Agent riêng | Phiên chính | Phiên chính |
+| Dev | **Nhiều agent** song song, mỗi agent 1 worktree, chia theo file | Phiên chính | Phiên chính |
+| Tester | Agent riêng, **test mù** (không xem code Dev) | Agent riêng (Sonnet), **test mù**, chạy song song với Dev | Phiên chính, viết test sau khi code |
+| Reviewer | Agent riêng (1 hoặc nhiều) | Agent riêng | Agent riêng |
+| Token (đo / ước lượng) | ~1–1,7 triệu cho việc cỡ #003 | ~350–450k | ~80–250k |
+
+**Mặc định: cách 3.** Nâng lên khi gặp điều kiện:
+
+| Điều kiện | Dùng |
+|---|---|
+| Sửa lỗi đã rõ nguyên nhân, việc nhỏ, không đổi hợp đồng | **Cách 3** |
+| Tính năng mới, hoặc yêu cầu dài dễ hiểu sai | **Cách 2** |
+| Đụng an toàn nick: đăng bài, bình luận, xin vào / rời nhóm, chuyển danh tính | **Cách 2** |
+| Gấp **và** chia được theo file không trùng **và** mỗi phần đủ lớn (vài trăm dòng+) | **Cách 1** |
+| Phiên chính quá dài, sắp đầy bối cảnh | **Cách 1** (giao bớt cho agent) |
+| Trước khi phát hành bản lớn cho khách | Cách 2 hoặc 3, **thêm Reviewer** theo từng góc (an toàn nick / dữ liệu khách cũ / giao diện) |
+
+**Model Reviewer:** việc lớn hoặc đụng an toàn nick → Opus; còn lại → Sonnet. Soát lại vòng sau (diff nhỏ) → Sonnet.
+
+**Quy tắc chung mọi cách:** agent chỉ sửa file trong worktree của mình; Tester agent chỉ ghi `tests/`; Điều phối kiểm `git status` trên `main` sau mỗi lượt agent (bài học #003: agent từng sửa nhầm thư mục đang chạy thật). Agent đọc ít nhất có thể: Điều phối đưa sẵn plan, chữ ký hàm, file:dòng cần xem thay vì để agent tự đọc file 100–270KB.
 
 Các vai: **PM** = bạn. **Điều phối** = phiên Claude chính (giao việc cho agent, gộp nhánh, cập nhật bảng tiến độ). **Architect / Dev / Tester / Reviewer** = agent trong `.claude/agents/`, mỗi agent bắt đầu trống, chỉ biết những gì ghi trong file vai + plan.
 

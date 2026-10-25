@@ -1,6 +1,6 @@
 # FacebookTool – quy ước cho mọi vai (Architect / Dev / Tester / Reviewer)
 
-Quy trình làm việc: [docs/QUY_TRINH.md](docs/QUY_TRINH.md). Kế hoạch từng việc: `plans/NNN_ten_viec.md` (mẫu: [docs/PLAN_MAU.md](docs/PLAN_MAU.md)). Lộ trình sản phẩm: `../KE_HOACH_THUONG_MAI.md`.
+Quy trình làm việc: [docs/QUY_TRINH.md](docs/QUY_TRINH.md) – mỗi task chọn **cách chạy 1 / 2 / 3** (mặc định 3: phiên chính làm Dev + test, chỉ Reviewer là agent). Kế hoạch từng việc: `plans/NNN_ten_viec.md` (mẫu: [docs/PLAN_MAU.md](docs/PLAN_MAU.md)). Lộ trình sản phẩm: `../KE_HOACH_THUONG_MAI.md`.
 
 ## Kiến trúc (đọc trước khi sửa)
 - `main.py`: cửa vào duy nhất (Task Scheduler, setup.ps1, giao diện). Chuyển lệnh sang `fb_upstt.py` (đăng bài, nhóm, chăm bài tự động, tin nhắn) hoặc `fb_monitor_v4.py` (quét nhóm theo dõi, bình luận). Kiểm bản quyền trước mỗi `--once`.

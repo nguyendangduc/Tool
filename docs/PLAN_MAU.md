@@ -3,6 +3,7 @@
 Trạng thái: Lập kế hoạch | Dựng khung | Đang làm | Review (vòng N) | Chờ PM merge | Đã merge
 PM chốt ngày: …
 Phụ thuộc: (task phải merge trước, vd "002 – cùng sửa fb_login.py") hoặc "không"
+Cách chạy: 1 / 2 / **3** (mặc định) – lý do: … (xem `docs/QUY_TRINH.md` mục "Chọn cách chạy"; PM chốt cùng plan)
 
 ## 1. Mục tiêu
 Một hai câu: làm xong thì người dùng làm được gì mới. Vì sao cần (lỗi / yêu cầu khách / kế hoạch).
