@@ -18,7 +18,8 @@ Làm tuần tự, trên `main`:
 - Field config mới → thêm vào `CAMPAIGN_DEFAULTS` kèm comment (tiếng Việt không dấu).
 - Hàm mới → chữ ký + docstring đủ vào/ra/lỗi + thân `raise NotImplementedError`.
 - Cấu trúc file JSON / dòng nhật ký / lệnh CLI → ghi vào mục "Hợp đồng" của plan.
-- Chạy `python -m pytest tests -q` để chắc khung không làm hỏng gì, rồi commit `chore(NNN): dựng khung`.
+- Chạy `python -m pytest tests -q` để chắc khung không làm hỏng gì, rồi commit `[architect] chore(NNN): dựng khung`.
+- Điền dòng bước 1, 2 ở mục "8. Tiến độ" trong plan. Plan xong thì DỪNG chờ PM chốt, không tự dựng khung.
 
 Không viết logic tính năng. Không chạy gì trên nick Facebook thật.
 Kết quả trả về: đường dẫn plan, danh sách hợp đồng đã chốt, các câu hỏi cho PM.

@@ -53,6 +53,25 @@ Kết quả: **ĐẠT** hoặc **CẦN SỬA** (kèm danh sách lỗi, mỗi l�
 4. Đạt → merge vào `main`, cập nhật `HUONG_DAN.md`, `KE_HOACH_THUONG_MAI.md`, `CHANGELOG.md`.
 5. Đủ để gửi khách → gắn tag `vX.Y.Z` → chạy `dong_goi.ps1` từ tag đó.
 
+## Theo dõi (PM xem Claude có làm đúng quy trình không)
+| Ở đâu | Thấy gì | Ai cập nhật |
+|---|---|---|
+| **Bảng tiến độ** (trang web) | Sơ đồ 5 bước của từng task, bước đang chạy sáng lên, ô vàng = đang chờ PM, nhật ký từng vai | Claude, mỗi lần chuyển bước |
+| Mục **"8. Tiến độ"** trong `plans/NNN_*.md` | Từng bước: vai, nhánh, commit, kết quả, thời gian | Vai vừa làm xong bước đó |
+| `git log --oneline --all --graph` | Commit có tiền tố vai, nhánh tách / gộp đúng sơ đồ | Tự có khi commit |
+
+**Tiền tố commit theo vai:** `[architect]`, `[dev-A]`, `[dev-B]`, `[tester]`, `[reviewer]`, `[pm]`. Ví dụ `[dev-A] feat(001): dong_goi chi chep file cho phep`.
+
+**Cổng chờ PM** – Claude DỪNG lại và báo bạn ở 2 chỗ, không tự đi tiếp:
+1. Sau bước 1: plan xong → **bạn chốt** thì mới dựng khung.
+2. Sau bước 4: Reviewer ĐẠT → **bạn test tay + bấm merge**. Claude không tự merge vào `main`.
+
+**Mỗi lần chuyển bước, Claude báo trong chat đúng mẫu:**
+```
+[#001] Bước 3 → 4 · Dev A xong (feat/001-dong-goi, 2 commit), Tester xong (6 test, 6 pass)
+Tiếp theo: Reviewer · Đang chờ bạn: không
+```
+
 ## Definition of Done (một việc chỉ "xong" khi)
 - [ ] Tiêu chí xong trong plan đạt hết
 - [ ] `pytest` pass, có test mới cho phần mới

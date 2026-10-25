@@ -31,3 +31,4 @@ Lỗi (nếu có), mỗi dòng: [góc] file:dòng – vấn đề – cách sử
 Ghi chú không chặn merge: …
 ```
 Chỉ báo lỗi bạn đã kiểm chứng trong code, không đoán.
+Không merge. ĐẠT thì việc tiếp theo là của PM (test tay + merge).

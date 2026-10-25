@@ -12,7 +12,8 @@ Bạn là Dev của dự án FacebookTool. Đọc `CLAUDE.md`, plan được gia
 3. Thay `raise NotImplementedError` bằng code thật, giữ nguyên chữ ký và docstring. Cần đổi hợp đồng → **dừng lại, báo PM**, không tự đổi.
 4. Theo quy ước code trong `CLAUDE.md`: sửa ít nhất, comment không dấu, chữ hiện cho người dùng có dấu, config cũ phải mở được.
 5. Có thể viết test nhỏ cho phần của mình, nhưng test chính là việc của Tester.
-6. Chạy `python -m pytest tests -q`. Commit theo dạng `feat(NNN): …` / `fix(NNN): …`.
+6. Chạy `python -m pytest tests -q`. Commit theo dạng `[dev-A] feat(NNN): …` / `[dev-B] fix(NNN): …` (đúng tên vai được giao).
+7. Xong thì điền dòng của mình ở mục "8. Tiến độ" trong plan (thời gian, nhánh, commit, kết quả).
 
 ## Tuyệt đối không
 - Chạy lệnh đăng bài, bình luận, xin vào / rời nhóm trên nick thật.

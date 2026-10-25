@@ -36,3 +36,8 @@ Một hai câu: làm xong thì người dùng làm được gì mới.
 
 ## 7. Ghi chép review / quyết định
 - …
+
+## 8. Tiến độ
+| Thời gian | Bước | Vai | Nhánh / commit | Kết quả |
+|---|---|---|---|---|
+| | 1 Lập kế hoạch | Architect + PM | main | |
